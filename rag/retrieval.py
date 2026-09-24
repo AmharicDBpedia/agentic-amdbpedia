@@ -392,8 +392,8 @@ def search(
     ontology's `rdfs:domain` is sparse and often broader than the class a
     property is actually used on (e.g. `iataLocationIdentifier`'s domain is
     `Infrastructure`, not `Airport`), so excluding non-matching domains would
-    silently drop correct answers. It only breaks ties between otherwise
-    equally-ranked candidates.
+    silently drop correct answers. For equal RRF scores, direct curated
+    alias evidence wins first, then `target_class` breaks any remaining tie.
 
     `index` lets a caller reuse an already-embedded `RetrievalIndex` across
     many `search()` calls (built once via `build_index()`) instead of paying
@@ -460,13 +460,15 @@ def search(
         log_event(LOGGER, "retrieval.no_match", threshold=threshold)
         return [NoMatchFound(query=query)]
 
-    def _sort_key(item: tuple[int, float]) -> tuple[float, int]:
+    def _sort_key(item: tuple[int, float]) -> tuple[float, int, int]:
         doc_index, score = item
-        domain = retrieval_index.documents[doc_index].domain
+        document = retrieval_index.documents[doc_index]
+        alias_match = int(_has_curated_alias_evidence(query, document))
+        domain = document.domain
         domain_match = int(
             bool(target_class and domain and domain.casefold() == target_class.casefold())
         )
-        return (score, domain_match)
+        return (score, alias_match, domain_match)
 
     ranked = sorted(fused.items(), key=_sort_key, reverse=True)
     top_index, top_score = ranked[0]
@@ -480,8 +482,13 @@ def search(
         return [NoMatchFound(query=query)]
 
     results: list[RetrievalResult] = []
-    for doc_index, score in ranked[:limit]:
+    for doc_index, score in ranked:
         doc = retrieval_index.documents[doc_index]
+        ambiguous_without_alias = (
+            score <= RRF_SINGLE_CHANNEL_TOP_SCORE and not _has_curated_alias_evidence(query, doc)
+        )
+        if score < threshold or ambiguous_without_alias:
+            continue
         results.append(
             SearchResult(
                 property=doc.property,
@@ -490,5 +497,7 @@ def search(
                 payload=_document_payload(doc),
             )
         )
+        if len(results) >= limit:
+            break
     log_event(LOGGER, "retrieval.complete", result_count=len(results))
     return results or [NoMatchFound(query=query)]

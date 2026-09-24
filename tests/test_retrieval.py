@@ -189,6 +189,92 @@ def test_search_target_class_breaks_ties_between_equally_ranked_documents() -> N
     assert results[0].property == "propB"
 
 
+def test_search_exact_alias_breaks_tie_before_broader_domain_hint() -> None:
+    dense_only_target_match = RetrievalDocument(
+        property="iataAirlineCode",
+        curie="dbo:iataAirlineCode",
+        uri="http://dbpedia.org/ontology/iataAirlineCode",
+        label="airline code",
+        property_type="DatatypeProperty",
+        domain="Airport",
+    )
+    sparse_alias_match = RetrievalDocument(
+        property="iataLocationIdentifier",
+        curie="dbo:iataLocationIdentifier",
+        uri="http://dbpedia.org/ontology/iataLocationIdentifier",
+        label="location identifier",
+        property_type="DatatypeProperty",
+        domain="Infrastructure",
+        amharic_aliases=("አያታ_ኮድ",),
+        english_aliases=("IATA",),
+    )
+
+    def dense_embedder(text: str) -> list[float]:
+        if text == "አያታ_ኮድ IATA" or "airline" in text:
+            return [1.0, 0.0]
+        return [0.0, 1.0]
+
+    results = search(
+        "አያታ_ኮድ IATA",
+        target_class="Airport",
+        corpus=[dense_only_target_match, sparse_alias_match],
+        dense_embedder=dense_embedder,
+        sparse_embedder=lexical_sparse_vector,
+        confidence_threshold=0.1,
+    )
+
+    assert isinstance(results[0], SearchResult)
+    assert results[0].property == "iataLocationIdentifier"
+
+
+def test_search_omits_ambiguous_single_channel_alternatives() -> None:
+    good = RetrievalDocument(
+        property="length",
+        curie="dbo:length",
+        uri="http://dbpedia.org/ontology/length",
+        label="length",
+        property_type="DatatypeProperty",
+        domain="Bridge",
+        amharic_aliases=("ርዝመት",),
+    )
+    dense_only = RetrievalDocument(
+        property="penisLength",
+        curie="dbo:penisLength",
+        uri="http://dbpedia.org/ontology/penisLength",
+        label="unrelated dense result",
+        property_type="DatatypeProperty",
+        domain="Person",
+    )
+    sparse_only = RetrievalDocument(
+        property="lineLength",
+        curie="dbo:lineLength",
+        uri="http://dbpedia.org/ontology/lineLength",
+        label="unrelated sparse result",
+        property_type="DatatypeProperty",
+        domain="RouteOfTransportation",
+    )
+    index = retrieval.RetrievalIndex(
+        documents=[good, dense_only, sparse_only],
+        dense_vectors=[[0.8, 0.0], [1.0, 0.0], [0.0, 1.0]],
+        sparse_vectors=[
+            SparseVector(indices=[1], values=[0.8]),
+            SparseVector(indices=[2], values=[1.0]),
+            SparseVector(indices=[1], values=[1.0]),
+        ],
+    )
+
+    results = search(
+        "ርዝመት",
+        target_class="Bridge",
+        index=index,
+        dense_embedder=lambda _text: [1.0, 0.0],
+        sparse_embedder=lambda _text: SparseVector(indices=[1], values=[1.0]),
+        confidence_threshold=0.35,
+    )
+
+    assert [result.property for result in results if isinstance(result, SearchResult)] == ["length"]
+
+
 def test_index_disk_cache_roundtrips_and_is_fingerprint_scoped(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
