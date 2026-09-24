@@ -114,7 +114,12 @@
 	) {
 		turn.manualMappings = [
 			...(turn.manualMappings ?? []),
-			{ templateProperty: fieldName, ontologyProperty: property, confidence: score, source: 'manual' }
+			{
+				templateProperty: fieldName,
+				ontologyProperty: property,
+				confidence: score,
+				source: 'manual'
+			}
 		];
 		turn.unmappedFields = (turn.unmappedFields ?? []).filter((f) => f.name !== fieldName);
 		delete assignByField[assignKey(turn.id, fieldName)];
@@ -216,7 +221,9 @@
 			scrollToBottom();
 			try {
 				const result = await findSemanticMatch(value, wantsClass);
-				if (result.status === 'no_match') {
+				if (result.status === 'rejected') {
+					turn.error = result.message ?? 'Rejected: prompt-injection attempt detected.';
+				} else if (result.status === 'no_match') {
 					turn.noMatch = true;
 				} else {
 					turn.matches = result.matches;
@@ -574,7 +581,9 @@
 												<div class="flex flex-wrap items-baseline gap-x-2">
 													<span class="font-mono text-xs">{field.name}</span>
 													{#if field.value}
-														<span class="truncate text-xs text-muted-foreground">= {field.value}</span>
+														<span class="truncate text-xs text-muted-foreground"
+															>= {field.value}</span
+														>
 													{/if}
 												</div>
 												{#if entry}
@@ -613,7 +622,12 @@
 																		type="button"
 																		class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs hover:border-primary/50 hover:bg-accent"
 																		onclick={() =>
-																			attachManualMapping(turn, field.name, match.property, match.score)}
+																			attachManualMapping(
+																				turn,
+																				field.name,
+																				match.property,
+																				match.score
+																			)}
 																	>
 																		<span class="font-mono">{match.property}</span>
 																		<ConfidencePill confidence={match.score} />
@@ -661,23 +675,13 @@
 
 	<div class="shrink-0 px-4 pb-4 md:px-8">
 		<div class="rounded-2xl border bg-card shadow-sm">
-			{#if targetClass}
-				<div class="flex items-center gap-1.5 px-3 pt-2.5">
-					<span class="text-xs text-muted-foreground">Target class:</span>
-					<span
-						class="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground"
-					>
-						{targetClass}
-					</span>
-					<button
-						type="button"
-						class="text-xs text-muted-foreground hover:text-foreground"
-						onclick={() => (targetClass = '')}
-					>
-						clear
-					</button>
-				</div>
-			{/if}
+			<div class="px-3 pt-2.5">
+				<Input
+					bind:value={targetClass}
+					placeholder="Target class (optional, e.g. Bridge)"
+					class="h-6 border-none bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
+				/>
+			</div>
 			<div class="flex items-end gap-2 p-2">
 				<Textarea
 					bind:value={input}
@@ -696,15 +700,6 @@
 					<Fa icon={faArrowUp} class="size-3.5" />
 				</Button>
 			</div>
-			{#if !targetClass}
-				<div class="px-3 pb-2">
-					<Input
-						bind:value={targetClass}
-						placeholder="Target class (optional, e.g. Bridge)"
-						class="h-6 border-none bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
-					/>
-				</div>
-			{/if}
 		</div>
 	</div>
 </div>

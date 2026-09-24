@@ -135,7 +135,11 @@ export async function* previewMapping(
 export async function findSemanticMatch(
 	amharicProperty: string,
 	targetClass?: string
-): Promise<{ status: 'ok' | 'no_match'; matches: MappingCandidate[] }> {
+): Promise<{
+	status: 'ok' | 'no_match' | 'rejected';
+	matches: MappingCandidate[];
+	message?: string;
+}> {
 	const res = await safeFetch(`${CROSS_LINGUAL_URL}/v1/find-semantic-match`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
