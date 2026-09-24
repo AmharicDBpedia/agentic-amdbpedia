@@ -133,7 +133,7 @@ def test_plain_amharic_field_does_not_call_probabilistic_classifier() -> None:
         def classify(self, _text: str) -> str:
             raise AssertionError("plain field labels should proceed directly to retrieval")
 
-    assert not is_injection_attempt("የቡና ጣዕም መለኪያ", UnexpectedClassifier())  # type: ignore[arg-type]
+    assert not is_injection_attempt("የቡና ጣዕም መለኪያ", UnexpectedClassifier())
 
 
 class ScriptedGroq:

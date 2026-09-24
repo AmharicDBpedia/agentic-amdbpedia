@@ -14,31 +14,13 @@ from typing import Any
 from config import Settings
 from errors import LLMUnavailableError
 from logging_config import correlation_context, log_event
+from mcp_server.guardrails import is_injection_attempt as is_injection_attempt
 from mcp_server.server import MappingPayload, find_semantic_match_impl, generate_mapping_syntax_impl
 
 LOGGER = logging.getLogger("dbpedia_mapping_assistant.agent")
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "mapping_assistant.md"
 PROMPT_TEMPLATE = PROMPT_PATH.read_text(encoding="utf-8")
 MAX_REACT_ITERATIONS = 4
-
-INJECTION_PATTERNS = [
-    re.compile(pattern, re.IGNORECASE)
-    for pattern in (
-        r"ignore\s+(all|any|previous|prior)\s+instructions",
-        r"disregard\s+(all|previous|prior)\s+instructions",
-        r"system\s+prompt",
-        r"developer\s+message",
-        r"you\s+are\s+now",
-        r"act\s+as\s+(a\s+)?system",
-        r"bypass\s+(the\s+)?tools?",
-        r"do\s+not\s+use\s+find_semantic_match",
-        r"write\s+raw\s+xml",
-        r"override\s+(the\s+)?rules?",
-        r"prioritize\s+my\s+instructions",
-        r"ignore\s+tool\s+results",
-        r"inisitirakishini\s+ignore",
-    )
-]
 
 
 class GroqUnavailableError(LLMUnavailableError):
@@ -242,18 +224,6 @@ def _response_to_reasoning_step(response: Any) -> ReasoningStep:
         return ReasoningStep(content=content, final=True)
     except (AttributeError, IndexError, json.JSONDecodeError):
         return ReasoningStep(content=str(response), final=True)
-
-
-def is_injection_attempt(text: str, groq_client: GroqClient | None = None) -> bool:
-    """Detect known prompt-injection patterns before any retrieval/tool call."""
-
-    if any(pattern.search(text) for pattern in INJECTION_PATTERNS):
-        return True
-    if not re.search(r"[a-z]", text, re.IGNORECASE):
-        return False
-    if groq_client is None:
-        return False
-    return groq_client.classify(text) == "injection"
 
 
 def tool_definitions() -> list[dict[str, Any]]:

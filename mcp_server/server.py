@@ -26,6 +26,7 @@ from logging_config import (
     get_correlation_id,
     log_event,
 )
+from mcp_server.guardrails import is_injection_attempt
 from rag.retrieval import NoMatchFound, SearchResult, search
 
 LOGGER = logging.getLogger("dbpedia_mapping_assistant.mcp")
@@ -149,6 +150,18 @@ def find_semantic_match_impl(
                 AssistantValidationError(
                     f"amharic_property must be at most {MAX_PROPERTY_LENGTH} characters"
                 )
+            )
+        if is_injection_attempt(amharic_property):
+            log_event(LOGGER, "mcp.find_semantic_match.rejected", reason="prompt_injection")
+            return json.dumps(
+                {
+                    "status": "rejected",
+                    "correlation_id": correlation_id,
+                    "reason": "prompt_injection",
+                    "message": "Rejected: prompt-injection attempt detected.",
+                    "matches": [],
+                },
+                ensure_ascii=False,
             )
         if os.environ.get("MCP_SERVER_TEST_MODE") == "1":
             return json.dumps(

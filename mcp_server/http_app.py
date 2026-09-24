@@ -55,7 +55,7 @@ from logging_config import correlation_context, get_correlation_id, log_event
 from mcp_server.consent import ConsentRequiredError, require_consent
 from mcp_server.pipeline import stream_mapping_pipeline
 from mcp_server.publish import PublishError, publish_mapping
-from mcp_server.server import find_semantic_match_impl
+from mcp_server.server import MAX_PROPERTY_LENGTH, find_semantic_match_impl
 from mcp_server.wiki_fetch import WikipediaFetchError, fetch_article_wikitext
 from rag.retrieval import search as default_search
 from rag.training_log import DEFAULT_LOG_PATH, log_decision
@@ -389,9 +389,16 @@ async def find_semantic_match(request: Request) -> Response:
             return _error_response(AssistantValidationError("Request body must be valid JSON"), 400)
 
         amharic_property = body.get("amharic_property") if isinstance(body, dict) else None
-        if not amharic_property:
+        if not isinstance(amharic_property, str) or not amharic_property.strip():
             return _error_response(
-                AssistantValidationError("Missing required field: amharic_property"), 400
+                AssistantValidationError("amharic_property must be a non-empty string"), 400
+            )
+        if len(amharic_property) > MAX_PROPERTY_LENGTH:
+            return _error_response(
+                AssistantValidationError(
+                    f"amharic_property must be at most {MAX_PROPERTY_LENGTH} characters"
+                ),
+                400,
             )
 
         search_func: SearchFunc = request.app.state.search_func

@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import create_review_item
 from logging_config import log_event
+from mcp_server.guardrails import is_injection_attempt
 from mcp_server.publish import build_mapping_wikitext
 from mcp_server.server import MappingEntry, MappingPayload, generate_mapping_syntax_impl
 from rag.ontology import AmharicMappingIndex
@@ -340,6 +341,9 @@ async def _predict_node(state: PipelineState) -> dict[str, Any]:
     unmapped_fields: list[dict[str, str]] = []
 
     for field in state.get("fields", []):
+        if is_injection_attempt(field.name):
+            warnings.append(f"Rejected suspicious field {field.name!r} as prompt injection.")
+            continue
         outcome = await asyncio.to_thread(predict_property, field.name, target_class=domain_class)
         if isinstance(outcome, PredictionResult):
             predictions[field.name] = outcome
