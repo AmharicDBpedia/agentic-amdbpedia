@@ -13,3 +13,6 @@ data/training_examples.jsonl
 data/training_exports/
 data/review_queue.db
 data/.cache/
+data/learned_aliases.json
+data/experiment_queue.db
+.ollama-pull/

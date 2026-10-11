@@ -11,6 +11,7 @@ from mcp_server.publish import (
     MediaWikiCredentialsError,
     PublishError,
     build_mapping_wikitext,
+    merge_mapping_wikitext,
     publish_mapping,
 )
 
@@ -43,7 +44,9 @@ class FakeTransport:
         edit_result: str = "Success",
         omit_login_token: bool = False,
         omit_csrf_token: bool = False,
+        existing_page: str | None = None,
     ) -> None:
+        self.existing_page = existing_page
         self.login_result = login_result
         self.edit_result = edit_result
         self.omit_login_token = omit_login_token
@@ -53,6 +56,19 @@ class FakeTransport:
 
     def get(self, params: dict[str, str]) -> dict[str, Any]:
         self.get_calls.append(params)
+        if params.get("prop") == "revisions":
+            if self.existing_page is None:
+                return {"query": {"pages": [{"title": params["titles"], "missing": True}]}}
+            return {
+                "query": {
+                    "pages": [
+                        {
+                            "title": params["titles"],
+                            "revisions": [{"slots": {"main": {"content": self.existing_page}}}],
+                        }
+                    ]
+                }
+            }
         if params["type"] == "login":
             if self.omit_login_token:
                 return {"query": {"tokens": {}}}
@@ -104,7 +120,11 @@ def test_publish_follows_the_login_then_csrf_then_edit_sequence() -> None:
         "Infobox airport", "Airport", SAMPLE_MAPPINGS, settings=_settings(), transport=transport
     )
 
-    assert [call["type"] for call in transport.get_calls] == ["login", "csrf"]
+    assert [call.get("type", call.get("prop")) for call in transport.get_calls] == [
+        "login",
+        "csrf",
+        "revisions",
+    ]
     assert [call["action"] for call in transport.post_calls] == ["login", "edit"]
     assert transport.post_calls[0]["lgname"] == "TestBot@publish-bot"
     assert transport.post_calls[0]["lgtoken"] == "fake-login-token"
@@ -129,6 +149,25 @@ def test_publish_raises_on_a_failed_login() -> None:
     with pytest.raises(PublishError, match="login failed"):
         publish_mapping(
             "Infobox airport", "Airport", SAMPLE_MAPPINGS, settings=_settings(), transport=transport
+        )
+
+
+def test_publish_explains_a_wiki_that_denies_api_login() -> None:
+    # What mappings.dbpedia.org really answers (checked live): an API error,
+    # not a login result -- this used to surface as "unknown error".
+    class WriteApiDenied(FakeTransport):
+        def post(self, data: dict[str, str]) -> dict[str, Any]:
+            if data.get("action") == "login":
+                return {"error": {"code": "writeapidenied", "info": "You're not allowed"}}
+            return super().post(data)
+
+    with pytest.raises(PublishError, match="writeapidenied.*admin"):
+        publish_mapping(
+            "Infobox airport",
+            "Airport",
+            SAMPLE_MAPPINGS,
+            settings=_settings(),
+            transport=WriteApiDenied(),
         )
 
 
@@ -182,3 +221,83 @@ def test_build_mapping_wikitext_round_trips_through_the_real_parser(tmp_path: Pa
     iata = index.lookup("አያታ_ኮድ")
     assert iata is not None
     assert iata.ontology_property == "iataLocationIdentifier"
+
+
+EXISTING_PLACE_PAGE = """{{TemplateMapping
+ | mapToClass = Place
+ | mappings =
+\t{{ PropertyMapping | templateProperty = ስም | ontologyProperty = foaf:name | language=am }}
+\t{{IntermediateNodeMapping
+\t| nodeClass = Demographics
+\t| correspondingProperty = demographics
+\t| mappings =
+\t\t\t{{ PropertyMapping | templateProperty = ሕዝብ_ጠቅላላ | ontologyProperty = populationTotal }}
+\t}}
+\t{{ PropertyMapping | templateProperty = ከፍታ | ontologyProperty = height | unit = metre }}
+}}"""
+
+
+def test_publishing_onto_an_existing_page_merges_instead_of_replacing_it() -> None:
+    transport = FakeTransport(existing_page=EXISTING_PLACE_PAGE)
+
+    publish_mapping(
+        "የቦታ መረጃ",
+        "City",
+        [
+            {"templateProperty": "ከፍታ", "ontologyProperty": "elevation"},  # correction
+            {"templateProperty": "ሕዝብ ጠቅላላ", "ontologyProperty": "populationTotal"},  # same
+            {"templateProperty": "ሰዓት_ክልል", "ontologyProperty": "timeZone"},  # new
+        ],
+        settings=_settings(),
+        transport=transport,
+    )
+
+    text = transport.post_calls[-1]["text"]
+    # Nothing that was already on the page is lost.
+    assert "foaf:name | language=am" in text
+    assert "nodeClass = Demographics" in text
+    assert text.count("populationTotal") == 1
+    # The correction keeps the row's other parameters.
+    assert "ontologyProperty = elevation | unit = metre" in text.replace("  ", " ")
+    assert "height" not in text
+    # The new field is added; the existing class is kept.
+    assert "templateProperty = ሰዓት_ክልል | ontologyProperty = timeZone" in text
+    assert "mapToClass = Place" in text and "City" not in text
+
+
+def test_merge_counts_and_round_trips_through_the_real_parser(tmp_path: Path) -> None:
+    text, counts = merge_mapping_wikitext(
+        EXISTING_PLACE_PAGE, "Place", [{"templateProperty": "ስም", "ontologyProperty": "foaf:name"}]
+    )
+
+    assert counts == {"added": 0, "updated": 0, "unchanged": 1}
+    assert text == EXISTING_PLACE_PAGE
+
+
+def test_publishing_identical_rows_onto_an_existing_page_makes_no_edit() -> None:
+    transport = FakeTransport(existing_page=EXISTING_PLACE_PAGE)
+
+    publish_mapping(
+        "የቦታ መረጃ",
+        "Place",
+        [{"templateProperty": "ስም", "ontologyProperty": "foaf:name"}],
+        settings=_settings(),
+        transport=transport,
+    )
+
+    assert [call["action"] for call in transport.post_calls] == ["login"]
+
+
+def test_a_conditional_mapping_page_is_never_overwritten() -> None:
+    transport = FakeTransport(existing_page="{{ConditionalMapping | cases = ... }}")
+
+    with pytest.raises(PublishError, match="not a plain TemplateMapping"):
+        publish_mapping(
+            "የቦታ መረጃ",
+            "Place",
+            [{"templateProperty": "ስም", "ontologyProperty": "name"}],
+            settings=_settings(),
+            transport=transport,
+        )
+
+    assert [call["action"] for call in transport.post_calls] == ["login"]

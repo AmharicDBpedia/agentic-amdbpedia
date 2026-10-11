@@ -13,6 +13,9 @@ def clear_settings_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "GROQ_MODEL_REASONING",
         "RETRIEVAL_CONFIDENCE_THRESHOLD",
         "DATABASE_URL",
+        "PREDICT_MODEL",
+        "PREDICT_FALLBACK_MODEL",
+        "PREDICT_LLM_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -57,3 +60,35 @@ def test_settings_malformed_threshold_raises_validation_error(
 
     with pytest.raises(ValidationError, match="RETRIEVAL_CONFIDENCE_THRESHOLD"):
         Settings(_env_file=None)
+
+
+def test_predict_chain_defaults_to_local_gemma_then_groq(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_settings_env(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_placeholder")
+    monkeypatch.setenv("GROQ_MODEL_FAST", "qwen/qwen3.8-27b")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.predict_model_chain() == ("gemma2", "groq/qwen/qwen3.8-27b")
+    assert settings.predict_llm_timeout_seconds == 60.0
+
+
+@pytest.mark.parametrize("disabled", ["none", "OFF", ""])
+def test_predict_fallback_can_be_disabled(monkeypatch: pytest.MonkeyPatch, disabled: str) -> None:
+    clear_settings_env(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_placeholder")
+    monkeypatch.setenv("PREDICT_FALLBACK_MODEL", disabled)
+
+    assert Settings(_env_file=None).predict_model_chain() == ("gemma2",)
+
+
+def test_predict_chain_honours_explicit_models(monkeypatch: pytest.MonkeyPatch) -> None:
+    clear_settings_env(monkeypatch)
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_placeholder")
+    monkeypatch.setenv("PREDICT_MODEL", "ollama_chat/gemma2:2b")
+    monkeypatch.setenv("PREDICT_FALLBACK_MODEL", "groq/openai/gpt-oss-20b")
+
+    assert Settings(_env_file=None).predict_model_chain() == (
+        "ollama_chat/gemma2:2b",
+        "groq/openai/gpt-oss-20b",
+    )

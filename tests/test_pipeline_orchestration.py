@@ -293,10 +293,12 @@ async def test_pipeline_handles_fields_with_no_retrieval_candidates(
         )
 
     assert result.mappings == []
-    assert any("No retrieval candidates" in warning for warning in result.warnings)
+    assert any("No confident ontology property" in warning for warning in result.warnings)
     # The unmapped field is carried through so the frontend can offer an
     # in-chat "search and assign this one yourself" step, not just a warning.
-    assert result.unmapped_fields == [{"name": "ያልታወቀ_መስክ", "value": "something"}]
+    assert result.unmapped_fields == [
+        {"name": "ያልታወቀ_መስክ", "value": "something", "suggestions": []}
+    ]
 
 
 @pytest.mark.asyncio
@@ -425,3 +427,74 @@ async def test_pipeline_generates_a_run_id_when_not_given(
         )
 
     assert result.run_id
+
+
+@pytest.mark.asyncio
+async def test_pipeline_infers_the_class_of_an_unmapped_template(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[str, list[str]]] = []
+
+    def fake_infer(template_name: str, field_names: list[str]) -> str | None:
+        seen.append((template_name, field_names))
+        return "Bridge"
+
+    monkeypatch.setattr("mcp_server.pipeline.predict_property", _fake_predict_property)
+    monkeypatch.setattr("mcp_server.pipeline.infer_template_class", fake_infer)
+    factory = session_factory(engine)
+
+    async with factory() as session:
+        result = await run_mapping_pipeline(
+            BRIDGE_WIKITEXT,
+            domain_class="Thing",
+            session=session,
+            mapping_index=_empty_mapping_index(),
+        )
+
+    assert seen and seen[0][0]
+    assert result.domain_class == "Bridge"
+    assert any("inferred from the template name" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_pipeline_never_overrides_an_explicit_class(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def must_not_infer(*_args: object) -> str | None:
+        raise AssertionError("class inference ran despite an explicit class")
+
+    monkeypatch.setattr("mcp_server.pipeline.predict_property", _fake_predict_property)
+    monkeypatch.setattr("mcp_server.pipeline.infer_template_class", must_not_infer)
+    factory = session_factory(engine)
+
+    async with factory() as session:
+        result = await run_mapping_pipeline(
+            BRIDGE_WIKITEXT,
+            domain_class="Bridge",
+            session=session,
+            mapping_index=_empty_mapping_index(),
+        )
+
+    assert result.domain_class == "Bridge"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_uses_the_canonical_name_of_a_redirected_template(
+    engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("mcp_server.pipeline.predict_property", _fake_predict_property)
+    monkeypatch.setattr(
+        "mcp_server.pipeline.canonical_template_name", lambda name: "መረጃሳጥን የድልድይ መረጃ"
+    )
+    factory = session_factory(engine)
+
+    async with factory() as session:
+        result = await run_mapping_pipeline(
+            BRIDGE_WIKITEXT,
+            domain_class="Bridge",
+            session=session,
+            mapping_index=_empty_mapping_index(),
+        )
+
+    assert result.template_name == "መረጃሳጥን የድልድይ መረጃ"
+    assert any("redirects to" in w for w in result.warnings)

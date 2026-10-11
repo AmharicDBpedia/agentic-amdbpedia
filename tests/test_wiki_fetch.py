@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import json
+import urllib.error
+from unittest import mock
+
 import pytest
 
 from mcp_server.wiki_fetch import (
     WikipediaFetchError,
+    _http_get,
     fetch_article_wikitext,
     parse_article_url,
 )
@@ -94,3 +99,102 @@ def test_fetch_article_wikitext_rejects_non_utf8_body() -> None:
 
     with pytest.raises(WikipediaFetchError, match="UTF-8"):
         fetch_article_wikitext("https://am.wikipedia.org/wiki/Bad", fetch=bad_encoding_fetch)
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [(404, "Article not found on Wikipedia"), (503, "Wikipedia returned HTTP 503")],
+)
+def test_http_errors_are_not_reported_as_unreachable(code: int, message: str) -> None:
+    error = urllib.error.HTTPError("https://am.wikipedia.org/x", code, "err", {}, None)  # type: ignore[arg-type]
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=error),
+        pytest.raises(WikipediaFetchError, match=message) as excinfo,
+    ):
+        _http_get("https://am.wikipedia.org/x")
+    assert "Could not reach" not in str(excinfo.value)
+
+
+def test_fetch_article_wikitext_follows_redirects() -> None:
+    pages = {
+        "ባሕር_ዳር": b"#REDIRECT [[\xe1\x89\xa3\xe1\x88\x95\xe1\x88\xad-\xe1\x8b\xb3\xe1\x88\xad]]",
+        "ባሕር-ዳር": "{{መረጃሳጥን ከተማ\n| ስም = ባሕር ዳር\n}}".encode(),
+    }
+    requested: list[str] = []
+
+    def fake_fetch(raw_url: str) -> bytes:
+        import urllib.parse
+
+        title = urllib.parse.parse_qs(urllib.parse.urlparse(raw_url).query)["title"][0]
+        requested.append(title)
+        return pages[title]
+
+    title, text = fetch_article_wikitext("https://am.wikipedia.org/wiki/ባሕር_ዳር", fetch=fake_fetch)
+
+    assert requested == ["ባሕር_ዳር", "ባሕር-ዳር"]
+    assert title == "ባሕር-ዳር"
+    assert text.startswith("{{መረጃሳጥን ከተማ")
+
+
+def test_fetch_article_wikitext_stops_on_a_redirect_loop() -> None:
+    def looping_fetch(_raw_url: str) -> bytes:
+        return b"#REDIRECT [[Loop]]"
+
+    with pytest.raises(WikipediaFetchError, match="Too many redirects"):
+        fetch_article_wikitext("https://am.wikipedia.org/wiki/Loop", fetch=looping_fetch)
+
+
+def test_transient_connection_errors_are_retried() -> None:
+    attempts: list[int] = []
+
+    class FakeResponse:
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{{Infobox}}"
+
+    def flaky(*_args: object, **_kwargs: object) -> FakeResponse:
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise urllib.error.URLError(OSError(101, "Network is unreachable"))
+        return FakeResponse()
+
+    with mock.patch("urllib.request.urlopen", side_effect=flaky):
+        assert _http_get("https://am.wikipedia.org/x", sleep=lambda _s: None) == b"{{Infobox}}"
+    assert len(attempts) == 3
+
+
+def test_a_404_is_not_retried() -> None:
+    error = urllib.error.HTTPError("https://am.wikipedia.org/x", 404, "nf", {}, None)  # type: ignore[arg-type]
+    with (
+        mock.patch("urllib.request.urlopen", side_effect=error) as urlopen,
+        pytest.raises(WikipediaFetchError, match="Article not found"),
+    ):
+        _http_get("https://am.wikipedia.org/x", sleep=lambda _s: None)
+    assert urlopen.call_count == 1
+
+
+def test_canonical_template_name_follows_a_template_redirect() -> None:
+    from mcp_server.wiki_fetch import canonical_template_name
+
+    payload = {
+        "query": {
+            "redirects": [{"from": "Template:ካውንቲ መረጃ", "to": "መለጠፊያ:መረጃሳጥን ካውንቲ መረጃ"}],
+            "pages": [{"title": "መለጠፊያ:መረጃሳጥን ካውንቲ መረጃ"}],
+        }
+    }
+    canonical_template_name.cache_clear()
+    with mock.patch("mcp_server.wiki_fetch._http_get", return_value=json.dumps(payload).encode()):
+        assert canonical_template_name("ካውንቲ መረጃ") == "መረጃሳጥን ካውንቲ መረጃ"
+
+
+def test_canonical_template_name_keeps_the_name_when_offline() -> None:
+    from mcp_server.wiki_fetch import canonical_template_name
+
+    canonical_template_name.cache_clear()
+    with mock.patch("mcp_server.wiki_fetch._http_get", side_effect=WikipediaFetchError("offline")):
+        assert canonical_template_name("የቦታ መረጃ") == "የቦታ መረጃ"

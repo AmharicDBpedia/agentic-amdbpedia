@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,11 +53,15 @@ from db.session import (
 )
 from errors import AssistantValidationError, ClientSafeError
 from logging_config import correlation_context, get_correlation_id, log_event
+from mcp_server import assistant
 from mcp_server.consent import ConsentRequiredError, require_consent
 from mcp_server.pipeline import stream_mapping_pipeline
 from mcp_server.publish import PublishError, publish_mapping
 from mcp_server.server import MAX_PROPERTY_LENGTH, find_semantic_match_impl
 from mcp_server.wiki_fetch import WikipediaFetchError, fetch_article_wikitext
+from rag import learned_aliases
+from rag.predict import PredictionResult, predict_property, production_predict_options
+from rag.retrieval import NoMatchFound
 from rag.retrieval import search as default_search
 from rag.training_log import DEFAULT_LOG_PATH, log_decision
 from scripts.refresh_wiki_cache import refresh_mappings
@@ -71,6 +76,17 @@ DECISION_TO_STATUS = {"approved": "approved", "rejected": "rejected"}
 # ^[A-Z][A-Za-z0-9]*$ -- owl:Thing is the natural default when a preview
 # request doesn't name a specific class.
 DEFAULT_PREVIEW_DOMAIN_CLASS = "Thing"
+MAX_ASSIST_TEXT_LENGTH = 20_000
+
+
+def _mediawiki_base_url() -> str:
+    try:
+        return Settings().mediawiki_base_url
+    except Exception:  # noqa: BLE001 - only used to build a link
+        from config import DEFAULT_MEDIAWIKI_BASE_URL
+
+        return DEFAULT_MEDIAWIKI_BASE_URL
+
 
 PublishFunc = Callable[..., str]
 RefreshMappingsFunc = Callable[..., int]
@@ -253,6 +269,16 @@ async def decide_review(request: Request) -> JSONResponse:
                     log_path=request.app.state.training_log_path,
                 )
 
+            if decision == "approved":
+                # Human-confirmed: reused before retrieval on the very next
+                # request for this field and class (rag/learned_aliases.py).
+                learned_aliases.record(
+                    item.domain_class,
+                    confirmed_mappings,
+                    review_id=review_id,
+                    path=request.app.state.learned_aliases_path,
+                )
+
             updated = await set_review_status(session, review_id, DECISION_TO_STATUS[decision])
             if corrected_mappings is not None:
                 updated.mappings = corrected_mappings
@@ -402,10 +428,199 @@ async def find_semantic_match(request: Request) -> Response:
             )
 
         search_func: SearchFunc = request.app.state.search_func
-        payload = find_semantic_match_impl(
-            amharic_property, body.get("target_class"), search_func=search_func
+        target_class = body.get("target_class")
+        payload = find_semantic_match_impl(amharic_property, target_class, search_func=search_func)
+        fallback_func: FallbackFunc | None = request.app.state.fallback_func
+        if fallback_func is None:
+            return Response(payload, media_type="application/json")
+        parsed = json.loads(payload)
+        if parsed.get("status") != "no_match":
+            return Response(payload, media_type="application/json")
+        # Retrieval's gate found nothing confident -- the normal case for
+        # Amharic vocabulary not in the corpus. Give the same LLM chain the
+        # pipeline uses a chance, and hand back unverified suggestions.
+        parsed.update(await asyncio.to_thread(fallback_func, amharic_property, target_class))
+        return JSONResponse(parsed)
+
+
+TEMPLATE_NAME_RE = re.compile(r"^[^\[\]{}|#<>\n]{1,200}$")
+PROPERTY_NAME_RE = re.compile(r"^(?:[a-z]+:)?[A-Za-z][A-Za-z0-9_]*$")
+TEMPLATE_PROPERTY_RE = re.compile(r"^[^\[\]{}|=\n]{1,120}$")
+
+
+async def assist_understand(request: Request) -> JSONResponse:
+    """`POST {text, target_class?}` -> the plan the chat should run (Groq,
+    with a deterministic fallback; see mcp_server/assistant.py)."""
+
+    with correlation_context():
+        try:
+            body: Any = await request.json()
+        except Exception:
+            return _error_response(AssistantValidationError("Request body must be valid JSON"), 400)
+        text = body.get("text") if isinstance(body, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            return _error_response(AssistantValidationError("text must be a non-empty string"), 400)
+        if len(text) > MAX_ASSIST_TEXT_LENGTH:
+            return _error_response(
+                AssistantValidationError(
+                    f"text must be at most {MAX_ASSIST_TEXT_LENGTH} characters"
+                ),
+                400,
+            )
+        plan = await asyncio.to_thread(
+            assistant.understand,
+            text,
+            target_class=body.get("target_class") or None,
+            client=request.app.state.chat_client,
         )
-        return Response(payload, media_type="application/json")
+        log_event(LOGGER, "http.assist_understood", intent=plan.intent, source=plan.source)
+        return JSONResponse(plan.to_api_dict())
+
+
+async def assist_summarize(request: Request) -> JSONResponse:
+    """`POST {kind: "infobox"|"field", result, language?}` -> `{message, source}`."""
+
+    with correlation_context():
+        try:
+            body: Any = await request.json()
+        except Exception:
+            return _error_response(AssistantValidationError("Request body must be valid JSON"), 400)
+        if not isinstance(body, dict) or not isinstance(body.get("result"), dict):
+            return _error_response(AssistantValidationError("result must be an object"), 400)
+        kind = body.get("kind")
+        if kind not in {"infobox", "field"}:
+            return _error_response(AssistantValidationError("kind must be infobox or field"), 400)
+        feedback = await asyncio.to_thread(
+            assistant.summarize,
+            body["result"],
+            kind=kind,
+            language="am" if body.get("language") == "am" else "en",
+            client=request.app.state.chat_client,
+        )
+        return JSONResponse({"message": feedback.message, "source": feedback.source})
+
+
+def _publish_validation_error(body: Any) -> str | None:
+    if not isinstance(body, dict):
+        return "Request body must be an object"
+    if body.get("consent") is not True:
+        return "consent must be true -- publishing writes to the live mappings wiki"
+    template_name = body.get("template_name")
+    if not isinstance(template_name, str) or not TEMPLATE_NAME_RE.match(template_name.strip()):
+        return "template_name must be a plain template name"
+    domain_class = body.get("domain_class")
+    if not isinstance(domain_class, str) or not re.match(r"^[A-Z][A-Za-z0-9]*$", domain_class):
+        return "domain_class must be a DBpedia class name like Museum"
+    mappings = body.get("mappings")
+    if not isinstance(mappings, list) or not mappings:
+        return "mappings must be a non-empty list"
+    for row in mappings:
+        if not isinstance(row, dict):
+            return "each mapping must be an object"
+        template_property = str(row.get("templateProperty", "")).strip()
+        ontology_property = str(row.get("ontologyProperty", "")).strip()
+        if not TEMPLATE_PROPERTY_RE.match(template_property):
+            return f"invalid templateProperty {template_property!r}"
+        if not PROPERTY_NAME_RE.match(ontology_property):
+            return f"invalid ontologyProperty {ontology_property!r}"
+    return None
+
+
+async def publish_route(request: Request) -> JSONResponse:
+    """Publish an edited mapping straight from the chat -- no review step.
+
+    `POST {template_name, domain_class, mappings, consent: true,
+    review_item_id?, original_mappings?}`. `consent` must be explicitly
+    `true` (the chat only sends it after its confirmation dialog): this is
+    a real edit to `Mapping am:<template_name>` on the live wiki. On success
+    the mappings become learned aliases, every row is logged as a training
+    example (a correction when it differs from `original_mappings`), the
+    pipeline's run record is marked published, and the corpus refreshes.
+    """
+
+    with correlation_context():
+        try:
+            body: Any = await request.json()
+        except Exception:
+            return _error_response(AssistantValidationError("Request body must be valid JSON"), 400)
+        problem = _publish_validation_error(body)
+        if problem is not None:
+            status = 403 if "consent" in problem else 400
+            return _error_response(AssistantValidationError(problem), status)
+
+        template_name = body["template_name"].strip()
+        domain_class = body["domain_class"]
+        mappings = [
+            {
+                "templateProperty": str(row["templateProperty"]).strip(),
+                "ontologyProperty": str(row["ontologyProperty"]).strip(),
+            }
+            for row in body["mappings"]
+        ]
+
+        publish_func: PublishFunc = request.app.state.publish_func
+        try:
+            title = await asyncio.to_thread(
+                require_consent(approved=True)(publish_func), template_name, domain_class, mappings
+            )
+        except (PublishError, ConsentRequiredError) as exc:
+            log_event(LOGGER, "http.publish_failed", error=str(exc))
+            payload: dict[str, Any] = (
+                dict(exc.to_payload())
+                if isinstance(exc, PublishError)
+                else {"status": "error", "error_type": "consent_required", "message": str(exc)}
+            )
+            payload["correlation_id"] = get_correlation_id()
+            return JSONResponse(payload, status_code=502)
+
+        original = {
+            str(m.get("templateProperty", "")).strip(): str(m.get("ontologyProperty", "")).strip()
+            for m in body.get("original_mappings") or []
+            if isinstance(m, dict)
+        }
+        for mapping in mappings:
+            predicted = original.get(mapping["templateProperty"], mapping["ontologyProperty"])
+            log_decision(
+                f"{domain_class}'s {mapping['templateProperty']}",
+                [predicted],
+                model_predicted=predicted,
+                human_confirmed=mapping["ontologyProperty"],
+                run_id=body.get("review_item_id"),
+                log_path=request.app.state.training_log_path,
+            )
+        learned_aliases.record(
+            domain_class,
+            mappings,
+            review_id=body.get("review_item_id"),
+            path=request.app.state.learned_aliases_path,
+        )
+
+        review_item_id = body.get("review_item_id")
+        if isinstance(review_item_id, str) and review_item_id:
+            factory = _session_factory_from_state(request)
+            async with factory() as session:
+                try:
+                    item = await set_review_status(session, review_item_id, "published")
+                    item.mappings = mappings
+                    await session.commit()
+                except ReviewNotFoundError:
+                    log_event(LOGGER, "http.publish_run_record_missing", review_id=review_item_id)
+
+        refresh_func: RefreshMappingsFunc = request.app.state.refresh_mappings_func
+        try:
+            await asyncio.to_thread(refresh_func)
+        except Exception as exc:  # noqa: BLE001 - the edit itself already succeeded
+            log_event(LOGGER, "http.refresh_after_publish_failed", error=exc.__class__.__name__)
+
+        base_url = request.app.state.mediawiki_base_url.rstrip("/")
+        log_event(LOGGER, "http.published", title=title, mappings=len(mappings))
+        return JSONResponse(
+            {
+                "status": "published",
+                "title": title,
+                "url": f"{base_url}/index.php/{str(title).replace(' ', '_')}",
+            }
+        )
 
 
 routes = [
@@ -416,7 +631,64 @@ routes = [
     Route("/v1/preview", preview_mapping, methods=["POST"]),
     Route("/v1/find-semantic-match", find_semantic_match, methods=["POST"]),
     Route("/v1/coverage", coverage, methods=["GET"]),
+    Route("/v1/assist/understand", assist_understand, methods=["POST"]),
+    Route("/v1/assist/summarize", assist_summarize, methods=["POST"]),
+    Route("/v1/publish", publish_route, methods=["POST"]),
 ]
+
+
+FallbackFunc = Callable[[str, str | None], dict[str, Any]]
+
+
+def fallback_payload(outcome: Any, target_class: str | None) -> dict[str, Any]:
+    """`/v1/find-semantic-match` fields for a `predict_property` outcome
+    reached after retrieval's own `no_match`."""
+
+    if isinstance(outcome, PredictionResult):
+        learned = outcome.method == "learned"
+        return {
+            "status": "ok",
+            "matches": [
+                {
+                    "property": outcome.property,
+                    "class": target_class or "",
+                    "score": 1.0 if learned else 0.3,
+                    "payload": {
+                        "source": "learned" if learned else "llm",
+                        "model": outcome.model,
+                        "reason": outcome.reason,
+                    },
+                }
+            ],
+            "suggestions": [],
+        }
+    return {
+        "status": "no_match",
+        "matches": [],
+        "suggestions": [
+            {
+                "property": s.property,
+                "class": s.ontology_class,
+                "score": s.score,
+                "payload": {"source": "suggestion"},
+            }
+            for s in getattr(outcome, "suggestions", ())
+        ],
+        "llm_error": getattr(outcome, "llm_error", None),
+    }
+
+
+def semantic_fallback(amharic_property: str, target_class: str | None) -> dict[str, Any]:
+    """Learned alias -> LLM propose -> LLM select-among-suggestions, without
+    re-running the retrieval that just returned `no_match`."""
+
+    outcome = predict_property(
+        amharic_property,
+        target_class=target_class,
+        search_func=lambda *_args, **_kwargs: [NoMatchFound(query=amharic_property)],
+        **production_predict_options(),
+    )
+    return fallback_payload(outcome, target_class)
 
 
 def create_app(
@@ -428,6 +700,11 @@ def create_app(
     refresh_mappings_func: RefreshMappingsFunc = refresh_mappings,
     search_func: SearchFunc = default_search,
     fetch_article_func: FetchArticleFunc = fetch_article_wikitext,
+    fallback_func: FallbackFunc | None = None,
+    use_default_fallback: bool = True,
+    learned_aliases_path: Path | None = None,
+    chat_client: assistant.ChatClient | None = None,
+    use_default_chat_client: bool = True,
 ) -> Starlette:
     """Build the app with a fresh engine/session factory in app.state, so
     tests can inject an isolated (e.g. in-memory SQLite) engine and/or an
@@ -440,7 +717,10 @@ def create_app(
     fakes for all three, since the real ones perform a live, irreversible
     MediaWiki write and real network fetches respectively. `search_func`
     defaults to the real rag.retrieval.search — tests inject a fake to
-    avoid the real embedding-model-backed index.
+    avoid the real embedding-model-backed index. `fallback_func` is what
+    `/v1/find-semantic-match` runs on a `no_match` (default: the real LLM
+    chain + ungated suggestions, `semantic_fallback`); tests pass
+    `use_default_fallback=False` to keep that path offline.
     """
 
     resolved_engine = engine or create_engine(settings=settings)
@@ -479,6 +759,16 @@ def create_app(
     app.state.publish_func = publish_func
     app.state.refresh_mappings_func = refresh_mappings_func
     app.state.search_func = search_func
+    app.state.chat_client = chat_client or (
+        assistant.default_chat_client() if use_default_chat_client else None
+    )
+    app.state.mediawiki_base_url = (
+        settings.mediawiki_base_url if settings is not None else _mediawiki_base_url()
+    )
+    app.state.learned_aliases_path = (
+        learned_aliases_path or learned_aliases.DEFAULT_LEARNED_ALIASES_PATH
+    )
+    app.state.fallback_func = fallback_func or (semantic_fallback if use_default_fallback else None)
     app.state.fetch_article_func = fetch_article_func
     return app
 

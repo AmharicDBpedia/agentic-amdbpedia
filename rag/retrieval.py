@@ -501,3 +501,69 @@ def search(
             break
     log_event(LOGGER, "retrieval.complete", result_count=len(results))
     return results or [NoMatchFound(query=query)]
+
+
+DEFAULT_SUGGESTION_LIMIT = 10
+
+
+def suggest(
+    query: str,
+    *,
+    target_class: str | None = None,
+    limit: int = DEFAULT_SUGGESTION_LIMIT,
+    dense_embedder: DenseEmbedder = embed_query_dense,
+    sparse_embedder: SparseEmbedder = embed_sparse,
+    index: RetrievalIndex | None = None,
+) -> list[SearchResult]:
+    """Ungated dense-only top-`limit` properties for `query`.
+
+    `search()` deliberately rejects any hit only one channel supports
+    unless a curated alias backs it up -- and a genuinely new Amharic field
+    name never overlaps the sparse channel (its only Amharic text is the
+    known aliases), so `search()` returns `NoMatchFound` for it even when
+    the dense model ranks the right property first. Measured on 51 unseen
+    Amharic field names (evaluation/novel_inputs/report.md): the correct
+    property was dense #1 for 17 and in the dense top-3 for 29, while
+    `search()` answered only 4.
+
+    These are *candidates*, never answers: callers either let the LLM pick
+    among them (with an explicit "none" option) or show them as unverified
+    suggestions. Scores are raw dense cosine similarities, not RRF scores,
+    and every payload carries `"source": "suggestion"`. Ties on similarity
+    prefer a property whose ontology domain equals `target_class`.
+    """
+
+    if not query.strip():
+        return []
+    retrieval_index = index if index is not None else get_index()
+    query_dense, _ = encode_query(
+        query, dense_embedder=dense_embedder, sparse_embedder=sparse_embedder
+    )
+    scores = [_dense_similarity(query_dense, vector) for vector in retrieval_index.dense_vectors]
+
+    def _key(i: int) -> tuple[float, int]:
+        domain = retrieval_index.documents[i].domain
+        same_class = int(
+            bool(target_class and domain and domain.casefold() == target_class.casefold())
+        )
+        return (round(scores[i], 6), same_class)
+
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+    for i in sorted(range(len(scores)), key=_key, reverse=True):
+        doc = retrieval_index.documents[i]
+        if doc.property in seen:
+            continue
+        seen.add(doc.property)
+        results.append(
+            SearchResult(
+                property=doc.property,
+                ontology_class=doc.domain or "",
+                score=round(scores[i], 4),
+                payload={**_document_payload(doc), "source": "suggestion"},
+            )
+        )
+        if len(results) >= limit:
+            break
+    log_event(LOGGER, "retrieval.suggest", result_count=len(results))
+    return results

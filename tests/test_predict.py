@@ -330,3 +330,202 @@ def test_real_dspy_program_construction_and_offline_fallback() -> None:
     # candidate chosen) or it wasn't (graceful fallback to top-1) — both are
     # correct outcomes; what must never happen is an unhandled exception.
     assert outcome.property in {"icaoLocationIdentifier", "iataLocationIdentifier"}
+
+
+# --- model chain, propose -> select-among-suggestions, learned aliases -----
+
+
+class ModelAwareProgram:
+    """Fails under any Ollama model and answers under anything else, so a
+    test can tell which model in the chain actually served the call."""
+
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
+        self.models: list[str] = []
+
+    def __call__(self, **kwargs: str) -> FakePrediction:
+        import dspy
+
+        model = dspy.settings.lm.model
+        self.models.append(model)
+        if model.startswith("ollama"):
+            raise ConnectionError("ollama not running")
+        return FakePrediction(property_class=self.answer)
+
+
+def _suggest_func(*names: str) -> Any:
+    def _fake(query: str, *, target_class: str | None = None, limit: int = 10) -> list[Any]:
+        return [SearchResult(property=n, ontology_class="", score=0.6, payload={}) for n in names][
+            :limit
+        ]
+
+    return _fake
+
+
+EMPTY_SEARCH = _search_func([NoMatchFound(query="x")])
+
+
+def test_rerank_falls_back_to_the_next_model_in_the_chain() -> None:
+    program = ModelAwareProgram(answer="iataLocationIdentifier")
+
+    outcome = predict_property(
+        "አያታ_ኮድ",
+        search_func=_search_func([ICAO, IATA]),
+        program=program,
+        circuit_breaker=None,
+        model_chain=("gemma2", "groq/some-model"),
+    )
+
+    assert isinstance(outcome, PredictionResult)
+    assert outcome.property == "iataLocationIdentifier"
+    assert outcome.model == "groq/some-model"
+    assert program.models == ["ollama_chat/gemma2:9b", "groq/some-model"]
+
+
+def test_rerank_premise_includes_the_target_class() -> None:
+    program = FakeProgram(answer="icaoLocationIdentifier")
+
+    predict_property(
+        "አይካኦ_ኮድ",
+        target_class="Airport",
+        search_func=_search_func([ICAO, IATA]),
+        program=program,
+        circuit_breaker=None,
+    )
+
+    assert program.calls[0]["premise"] == "Airport's አይካኦ_ኮድ"
+
+
+def test_rerank_never_considers_unverified_suggestions() -> None:
+    """Measured live: appending ungated alternatives let the LLM override a
+    correct curated answer. Confident candidates are reranked on their own."""
+
+    staff = SearchResult(property="numberOfStaff", ontology_class="", score=1.0, payload={})
+    program = FakeProgram(answer="numberOfStaff")
+
+    outcome = predict_property(
+        "የሰራተኞች_ብዛት",
+        target_class="Company",
+        search_func=_search_func([staff]),
+        suggest_func=_suggest_func("numberOfStaff", "numberOfEmployees"),
+        program=program,
+        circuit_breaker=None,
+    )
+
+    assert program.calls[0]["candidates"] == "numberOfStaff"
+    assert isinstance(outcome, PredictionResult)
+    assert outcome.method == "rerank"
+    assert outcome.top_retrieval_result == staff
+
+
+def test_select_among_suggestions_runs_when_propose_abstains() -> None:
+    select = FakeProgram(answer="publisher")
+
+    outcome = predict_property(
+        "አሳታሚ",
+        target_class="Book",
+        search_func=EMPTY_SEARCH,
+        suggest_func=_suggest_func("publisher", "firstPublisher"),
+        circuit_breaker=None,
+        propose_program=FakeProposeProgram(answer="none"),
+        select_program=select,
+        catalog=FakeCatalog("publisher"),
+    )
+
+    assert isinstance(outcome, PredictionResult)
+    assert outcome.property == "publisher"
+    assert outcome.method == "llm_select"
+    assert outcome.llm_proposed is True
+    assert select.calls == [{"premise": "Book's አሳታሚ", "candidates": "publisher; firstPublisher"}]
+
+
+@pytest.mark.parametrize("answer", ["none", "None.", "completelyMadeUpProperty"])
+def test_select_among_suggestions_can_decline(answer: str) -> None:
+    outcome = predict_property(
+        "የድመቱ_ተወዳጅ_ቀለም",
+        search_func=EMPTY_SEARCH,
+        suggest_func=_suggest_func("colour", "cargoFuel", "status", "x"),
+        circuit_breaker=None,
+        propose_program=FakeProposeProgram(answer="none"),
+        select_program=FakeProgram(answer=answer),
+        catalog=FakeCatalog("colour"),
+    )
+
+    assert isinstance(outcome, NoCandidatesFound)
+    assert [s.property for s in outcome.suggestions] == ["colour", "cargoFuel", "status"]
+    assert outcome.llm_error is None
+
+
+def test_propose_wins_without_running_select() -> None:
+    select = FakeProgram(answer="publisher")
+
+    outcome = predict_property(
+        "ደራሲ",
+        target_class="Book",
+        search_func=EMPTY_SEARCH,
+        suggest_func=_suggest_func("writer", "author"),
+        circuit_breaker=None,
+        propose_program=FakeProposeProgram(answer="author"),
+        select_program=select,
+        catalog=FakeCatalog("author"),
+    )
+
+    assert isinstance(outcome, PredictionResult)
+    assert outcome.property == "author"
+    assert outcome.method == "llm_propose"
+    assert select.calls == []
+
+
+def test_no_candidates_reports_llm_error_when_every_model_fails() -> None:
+    class Down:
+        def __call__(self, **_kwargs: str) -> FakePrediction:
+            raise ConnectionError("down")
+
+    outcome = predict_property(
+        "አሳታሚ",
+        search_func=EMPTY_SEARCH,
+        suggest_func=_suggest_func("publisher"),
+        circuit_breaker=None,
+        model_chain=("gemma2", "groq/some-model"),
+        propose_program=Down(),
+        catalog=FakeCatalog("publisher"),
+    )
+
+    assert isinstance(outcome, NoCandidatesFound)
+    assert outcome.llm_error is not None
+    assert "gemma2" in outcome.llm_error and "groq/some-model" in outcome.llm_error
+    assert [s.property for s in outcome.suggestions] == ["publisher"]
+
+
+def test_learned_alias_short_circuits_retrieval_and_llm() -> None:
+    def search_must_not_run(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise AssertionError("retrieval should not run for a learned alias")
+
+    outcome = predict_property(
+        "የገጽ_ብዛት",
+        target_class="Book",
+        search_func=search_must_not_run,
+        learned_lookup=lambda field, cls: "numberOfPages" if cls == "Book" else None,
+    )
+
+    assert isinstance(outcome, PredictionResult)
+    assert outcome.property == "numberOfPages"
+    assert outcome.method == "learned"
+    assert outcome.used_llm is False
+
+
+def test_suggestion_failures_never_break_prediction() -> None:
+    def broken_suggest(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise RuntimeError("index missing")
+
+    outcome = predict_property(
+        "ያልታወቀ",
+        search_func=EMPTY_SEARCH,
+        suggest_func=broken_suggest,
+        circuit_breaker=None,
+        propose_program=FakeProposeProgram(answer="none"),
+        catalog=FakeCatalog(),
+    )
+
+    assert isinstance(outcome, NoCandidatesFound)
+    assert outcome.suggestions == ()

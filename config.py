@@ -12,6 +12,17 @@ DEFAULT_RETRIEVAL_CONFIDENCE_THRESHOLD = 0.35
 # docker-compose Postgres service is opt-in via DATABASE_URL (refs 14.1).
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./data/review_queue.db"
 DEFAULT_MEDIAWIKI_BASE_URL = "https://mappings.dbpedia.org"
+# Pipeline LLM (rerank + propose-from-scratch). The primary model is the
+# local Gemma 2 9B via Ollama (rag/predict.py's registry alias); when Ollama
+# is unreachable or too slow, the same call is retried on the fallback model
+# -- by default Groq's GROQ_MODEL_FAST, so a configured GROQ_API_KEY alone is
+# enough for the LLM layer to work. Set PREDICT_FALLBACK_MODEL=none to
+# disable the fallback entirely.
+DEFAULT_PREDICT_MODEL = "gemma2"
+# Gemma 2 9B on CPU (no usable GPU) takes several seconds for the first
+# token, and much longer on the first call while Ollama loads the weights.
+DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS = 60.0
+PREDICT_FALLBACK_DISABLED = {"", "none", "off", "false", "0"}
 
 
 class Settings(BaseSettings):
@@ -37,6 +48,12 @@ class Settings(BaseSettings):
         le=1.0,
         alias="RETRIEVAL_CONFIDENCE_THRESHOLD",
     )
+    predict_model: str = Field(default=DEFAULT_PREDICT_MODEL, alias="PREDICT_MODEL")
+    # None -> "groq/<GROQ_MODEL_FAST>" (see predict_model_chain()).
+    predict_fallback_model: str | None = Field(default=None, alias="PREDICT_FALLBACK_MODEL")
+    predict_llm_timeout_seconds: float = Field(
+        default=DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS, gt=0.0, alias="PREDICT_LLM_TIMEOUT_SECONDS"
+    )
     database_url: str = Field(default=DEFAULT_DATABASE_URL, alias="DATABASE_URL")
     # Bot Password only (Special:BotPasswords) -- never a real MediaWiki
     # account password. Both unset by default; publish_mapping() fails
@@ -45,3 +62,14 @@ class Settings(BaseSettings):
     mediawiki_base_url: str = Field(default=DEFAULT_MEDIAWIKI_BASE_URL, alias="MEDIAWIKI_BASE_URL")
     mediawiki_bot_username: str | None = Field(default=None, alias="MEDIAWIKI_BOT_USERNAME")
     mediawiki_bot_password: str | None = Field(default=None, alias="MEDIAWIKI_BOT_PASSWORD")
+
+    def predict_model_chain(self) -> tuple[str, ...]:
+        """Models the pipeline LLM tries in order: primary, then fallback."""
+
+        fallback = self.predict_fallback_model
+        if fallback is None:
+            fallback = f"groq/{self.groq_model_fast}"
+        chain = [self.predict_model]
+        if fallback.strip().casefold() not in PREDICT_FALLBACK_DISABLED and fallback not in chain:
+            chain.append(fallback.strip())
+        return tuple(chain)

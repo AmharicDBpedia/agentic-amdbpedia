@@ -1,5 +1,26 @@
 # Changelog
 
+- `feat(ui): 404 page inside the app layout (sidebar kept); old /review links explain the Review Queue was removed`
+- `test(eval): round 4, 16 new infoboxes (104 fields) with gemma2:9b vs Groq, hand-graded; runner saves after each infobox and writes a Markdown report (evaluation/novel_inputs/round4_report.md)`
+
+- `fix(publish): merge into an existing Mapping am: page instead of overwriting it (existing rows, intermediate nodes and units kept; ConditionalMapping pages refused)`
+- `fix(pipeline): resolve template redirects to the canonical template; Groq infers the class of unmapped templates; find infoboxes inside HTML and by shape`
+- `fix(wiki): retry transient connection errors and raise the fetch timeout to 30 s`
+- `test(eval): 36 real Amharic Wikipedia articles through the pipeline, hand-graded (evaluation/novel_inputs/real_articles_report.md)`
+
+- `feat(chat): Groq reads each message (intent, field, DBpedia class) before the pipeline and writes the final reply after it; replies naming properties not in the result are discarded`
+- `feat(chat): edit mappings inside the chat and publish directly (POST /v1/publish, explicit consent); approve/reject and the review page are removed`
+- `feat(infra): ollama service in docker-compose for local gemma2:9b`
+
+- `fix(predict): make the LLM layer reachable -- Ollama gemma2 first, Groq fallback, configurable via PREDICT_MODEL / PREDICT_FALLBACK_MODEL / PREDICT_LLM_TIMEOUT_SECONDS`
+- `feat(predict): propose-then-select-among-suggestions (with an explicit "none") when retrieval finds no confident match; target class in every rerank premise`
+- `feat(retrieval): ungated dense suggest() for unverified suggestions on unmapped fields and no-match lookups`
+- `feat(review): approved mappings become class-scoped learned aliases, checked before retrieval`
+- `feat(http): find-semantic-match falls back to the LLM chain and returns suggestions + llm_error on no_match`
+- `feat(frontend): AI-proposed / learned badges, clickable suggestions for unmapped fields, "LLM unavailable" notice`
+- `fix(wiki): report a missing Wikipedia article as "not found" instead of "could not reach"; follow #REDIRECT pages`
+- `test(eval): novel-input experiment (evaluation/novel_inputs) -- unseen Amharic fields, before/after`
+
 - `feat(http): SSE preview endpoint + find-semantic-match, frontend PLANNED → EXISTING (refs 16.3)`
 - `feat(pipeline): LangGraph orchestration — extract → predict → format → persist (refs 16.2)`
 - `feat(pipeline): infobox extraction node, ported from agentic-dbpedia's DumpTemplateParser (refs 16.1)`

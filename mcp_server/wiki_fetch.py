@@ -18,16 +18,21 @@ matching how every other real HTTP call in this repo is already tested.
 
 from __future__ import annotations
 
+import json
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from functools import lru_cache
 
 from errors import ClientSafeError
 
 _HEADERS = {"User-Agent": "agentic-amdbpedia/wiki-fetch"}
-DEFAULT_TIMEOUT = 15.0
+# 15 s was measured live to time out under a busy connection (a large
+# download running alongside); retries handle the rest.
+DEFAULT_TIMEOUT = 30.0
 
 # Matches "wikipedia.org" itself and any subdomain (am.wikipedia.org,
 # en.wikipedia.org, ...) -- this project is Amharic-focused, but nothing
@@ -81,15 +86,47 @@ def parse_article_url(url: str) -> tuple[str, str]:
 
 Fetcher = Callable[[str], bytes]
 
+MAX_REDIRECTS = 3
+# "#REDIRECT [[Target]]" / "#REDIRECT [[Target#Section|label]]"; MediaWiki
+# accepts the English keyword on every language edition.
+_REDIRECT = re.compile(r"^\s*#REDIRECT\s*\[\[([^\]|#]+)", re.IGNORECASE)
 
-def _http_get(url: str) -> bytes:
+
+# Connection-level failures (DNS, "Network is unreachable", resets) were
+# seen live to come and go within seconds and cost whole articles in a
+# batch run; they are retried. An HTTP answer (404, 5xx) is never retried.
+CONNECT_ATTEMPTS = 3
+RETRY_BACKOFF_SECONDS = 2.0
+
+
+def _http_get(url: str, *, sleep: Callable[[float], None] = time.sleep) -> bytes:
     request = urllib.request.Request(url, headers=_HEADERS)
+    for attempt in range(CONNECT_ATTEMPTS):
+        try:
+            return _open(request)
+        except WikipediaFetchError:
+            raise
+        except (urllib.error.URLError, OSError, TimeoutError) as exc:
+            if attempt == CONNECT_ATTEMPTS - 1:
+                raise WikipediaFetchError(f"Could not reach {url}: {exc}") from exc
+            sleep(RETRY_BACKOFF_SECONDS * (attempt + 1))
+    raise WikipediaFetchError(f"Could not reach {url}")  # pragma: no cover
+
+
+def _open(request: urllib.request.Request) -> bytes:
+    url = request.full_url
     try:
         with urllib.request.urlopen(request, timeout=DEFAULT_TIMEOUT) as response:  # noqa: S310 - host allowlisted in parse_article_url
             body: bytes = response.read()
             return body
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
-        raise WikipediaFetchError(f"Could not reach {url}: {exc}") from exc
+    except urllib.error.HTTPError as exc:
+        # Wikipedia answered -- "Could not reach" would send the user off
+        # debugging their network for what is really a typo in the title.
+        if exc.code == 404:
+            raise WikipediaFetchError(
+                "Article not found on Wikipedia -- check the title in the link"
+            ) from exc
+        raise WikipediaFetchError(f"Wikipedia returned HTTP {exc.code} for {url}") from exc
 
 
 def fetch_article_wikitext(url: str, *, fetch: Fetcher = _http_get) -> tuple[str, str]:
@@ -100,15 +137,64 @@ def fetch_article_wikitext(url: str, *, fetch: Fetcher = _http_get) -> tuple[str
     already use."""
 
     base_url, title = parse_article_url(url)
-    raw_url = f"{base_url}/w/index.php?" + urllib.parse.urlencode({"title": title, "action": "raw"})
 
-    body = fetch(raw_url)
+    # `action=raw` returns a redirect page's own source ("#REDIRECT
+    # [[ባሕር-ዳር]]"), not its target -- confirmed live for ባሕር_ዳር and
+    # አዲስ_አበባ_ዩኒቨርሲቲ, which then looked like articles with no infobox.
+    for _hop in range(MAX_REDIRECTS + 1):
+        raw_url = f"{base_url}/w/index.php?" + urllib.parse.urlencode(
+            {"title": title, "action": "raw"}
+        )
+        body = fetch(raw_url)
+        try:
+            text = body.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise WikipediaFetchError(f"Article {title!r} was not valid UTF-8") from exc
+
+        if not text.strip():
+            raise WikipediaFetchError(f"Article {title!r} appears to be empty or does not exist")
+
+        redirect = _REDIRECT.match(text)
+        if redirect is None:
+            return title, text
+        title = redirect.group(1).strip().replace(" ", "_")
+
+    raise WikipediaFetchError(f"Too many redirects while resolving {url}")
+
+
+DEFAULT_WIKI_BASE = "https://am.wikipedia.org"
+
+
+@lru_cache(maxsize=1024)
+def canonical_template_name(name: str, base_url: str = DEFAULT_WIKI_BASE) -> str:
+    """The template a redirect like `{{ካውንቲ መረጃ}}` points to
+    (`መረጃሳጥን ካውንቲ መረጃ`), or `name` itself.
+
+    DBpedia's extraction framework resolves template redirects before it
+    looks up `Mapping am:<template>`, so a mapping published under a
+    redirect's name is never used. Any failure (offline, API error) keeps
+    the name as written.
+    """
+
+    if not name.strip():
+        return name
+    query = urllib.parse.urlencode(
+        {
+            "action": "query",
+            "titles": f"Template:{name.strip()}",
+            "redirects": "1",
+            "format": "json",
+            "formatversion": "2",
+        }
+    )
     try:
-        text = body.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise WikipediaFetchError(f"Article {title!r} was not valid UTF-8") from exc
-
-    if not text.strip():
-        raise WikipediaFetchError(f"Article {title!r} appears to be empty or does not exist")
-
-    return title, text
+        payload = json.loads(_http_get(f"{base_url.rstrip('/')}/w/api.php?{query}"))
+    except Exception:  # noqa: BLE001 - resolution is best-effort
+        return name
+    pages = payload.get("query", {}).get("pages", [])
+    if not pages or pages[0].get("missing"):
+        return name
+    title = str(pages[0].get("title", ""))
+    # Strip the localized namespace ("መለጠፊያ:" on am.wikipedia).
+    resolved = title.split(":", 1)[1] if ":" in title else title
+    return resolved or name

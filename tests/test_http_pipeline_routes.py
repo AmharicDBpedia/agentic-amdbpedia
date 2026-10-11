@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,6 +25,9 @@ def _in_memory_app(**kwargs: Any) -> Starlette:
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
+    kwargs.setdefault("use_default_fallback", False)
+    kwargs.setdefault("use_default_chat_client", False)
+    kwargs.setdefault("learned_aliases_path", Path(tempfile.mkdtemp()) / "learned_aliases.json")
     return create_app(engine=engine, **kwargs)
 
 
@@ -317,3 +322,238 @@ def test_preview_reports_a_failed_wikipedia_fetch_as_an_error_step_not_a_500(
     assert events[1]["mappings"] == []
     assert events[1]["reviewItemId"] is None
     assert events[1]["unmappedFields"] == []
+
+
+def test_find_semantic_match_route_runs_the_fallback_on_no_match() -> None:
+    def fake_search(query: str, *, target_class: str | None = None, limit: int = 3) -> list[object]:
+        return [NoMatchFound(query=query)]
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_fallback(query: str, target_class: str | None) -> dict[str, object]:
+        calls.append((query, target_class))
+        return {
+            "status": "no_match",
+            "matches": [],
+            "suggestions": [{"property": "publisher", "class": "", "score": 0.57}],
+            "llm_error": None,
+        }
+
+    app = _in_memory_app(search_func=fake_search, fallback_func=fake_fallback)
+
+    with TestClient(app) as client:
+        body = client.post(
+            "/v1/find-semantic-match", json={"amharic_property": "አሳታሚ", "target_class": "Book"}
+        ).json()
+
+    assert calls == [("አሳታሚ", "Book")]
+    assert body["status"] == "no_match"
+    assert body["suggestions"][0]["property"] == "publisher"
+    assert "correlation_id" in body
+
+
+def test_find_semantic_match_route_skips_the_fallback_on_a_confident_match() -> None:
+    def fake_search(query: str, *, target_class: str | None = None, limit: int = 3) -> list[object]:
+        return [SearchResult(property="length", ontology_class="Bridge", score=1.0, payload={})]
+
+    def fallback_must_not_run(*_args: object) -> dict[str, object]:
+        raise AssertionError("fallback ran on a confident match")
+
+    app = _in_memory_app(search_func=fake_search, fallback_func=fallback_must_not_run)
+
+    with TestClient(app) as client:
+        body = client.post("/v1/find-semantic-match", json={"amharic_property": "ርዝመት"}).json()
+
+    assert body["status"] == "ok"
+
+
+def test_fallback_payload_marks_llm_and_learned_answers() -> None:
+    from mcp_server.http_app import fallback_payload
+
+    llm = PredictionResult(
+        property="author",
+        used_llm=True,
+        candidates=["author"],
+        top_retrieval_result=None,
+        llm_proposed=True,
+        method="llm_propose",
+        model="groq/qwen/qwen3.8-27b",
+    )
+    learned = PredictionResult(
+        property="numberOfPages",
+        used_llm=False,
+        candidates=["numberOfPages"],
+        top_retrieval_result=None,
+        method="learned",
+    )
+
+    llm_body = fallback_payload(llm, "Book")
+    learned_body = fallback_payload(learned, "Book")
+
+    assert llm_body["status"] == "ok"
+    assert llm_body["matches"][0]["payload"]["source"] == "llm"
+    assert llm_body["matches"][0]["score"] == 0.3
+    assert learned_body["matches"][0]["payload"]["source"] == "learned"
+    assert learned_body["matches"][0]["score"] == 1.0
+
+
+# --- assist + publish (chat flow without a review step) --------------------
+
+
+class _FakeChat:
+    def __init__(self, reply: str) -> None:
+        self.reply = reply
+
+    def complete(self, messages: list[dict[str, str]], *, json_mode: bool) -> str:
+        return self.reply
+
+
+def test_assist_understand_route_returns_a_plan() -> None:
+    chat = _FakeChat(json.dumps({"intent": "field", "field": "ዋና_አዘጋጅ", "target_class": None}))
+    app = _in_memory_app(chat_client=chat)
+
+    with TestClient(app) as client:
+        body = client.post("/v1/assist/understand", json={"text": "ዋና_አዘጋጅ ምንድን ነው?"}).json()
+
+    assert body["intent"] == "field"
+    assert body["text"] == "ዋና_አዘጋጅ"
+    assert body["source"] == "groq"
+
+
+def test_assist_summarize_route_guards_against_invented_properties() -> None:
+    app = _in_memory_app(chat_client=_FakeChat("Mapped `inventedThing`."))
+    result = {"mappings": [{"templateProperty": "ስም", "ontologyProperty": "name"}]}
+
+    with TestClient(app) as client:
+        body = client.post(
+            "/v1/assist/summarize", json={"kind": "infobox", "result": result}
+        ).json()
+
+    assert body["source"] == "rules"
+    assert "inventedThing" not in body["message"]
+
+
+PUBLISH_BODY = {
+    "template_name": "መረጃሳጥን ሙዚየም",
+    "domain_class": "Museum",
+    "mappings": [{"templateProperty": "ተቆጣጣሪ", "ontologyProperty": "curator"}],
+    "original_mappings": [{"templateProperty": "ተቆጣጣሪ", "ontologyProperty": "director"}],
+    "consent": True,
+}
+
+
+def test_publish_route_requires_explicit_consent() -> None:
+    calls: list[object] = []
+
+    def recording_publish(*args: object) -> str:
+        calls.append(args)
+        return "x"
+
+    app = _in_memory_app(publish_func=recording_publish)
+
+    with TestClient(app) as client:
+        response = client.post("/v1/publish", json={**PUBLISH_BODY, "consent": False})
+
+    assert response.status_code == 403
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("template_name", "Bad]]Name"),
+        ("domain_class", "museum"),
+        ("mappings", []),
+        ("mappings", [{"templateProperty": "ስም", "ontologyProperty": "not a property"}]),
+    ],
+)
+def test_publish_route_validates_its_input(field: str, value: object) -> None:
+    calls: list[object] = []
+
+    def recording_publish(*args: object) -> str:
+        calls.append(args)
+        return "x"
+
+    app = _in_memory_app(publish_func=recording_publish)
+
+    with TestClient(app) as client:
+        response = client.post("/v1/publish", json={**PUBLISH_BODY, field: value})
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_publish_route_publishes_and_learns(tmp_path: Path) -> None:
+    from rag.learned_aliases import lookup
+    from rag.training_log import read_examples
+
+    published: list[tuple[str, str, list[dict[str, str]]]] = []
+    refreshed: list[bool] = []
+    learned = tmp_path / "learned.json"
+    log = tmp_path / "log.jsonl"
+
+    def fake_publish(template: str, cls: str, mappings: list[dict[str, str]]) -> str:
+        published.append((template, cls, mappings))
+        return f"Mapping am:{template}"
+
+    app = _in_memory_app(
+        publish_func=fake_publish,
+        refresh_mappings_func=lambda: refreshed.append(True),
+        learned_aliases_path=learned,
+        training_log_path=log,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/v1/publish", json=PUBLISH_BODY)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "published"
+    assert body["title"] == "Mapping am:መረጃሳጥን ሙዚየም"
+    assert body["url"].endswith("/index.php/Mapping_am:መረጃሳጥን_ሙዚየም")
+    assert published == [
+        ("መረጃሳጥን ሙዚየም", "Museum", [{"templateProperty": "ተቆጣጣሪ", "ontologyProperty": "curator"}])
+    ]
+    assert refreshed == [True]
+    assert lookup("ተቆጣጣሪ", "Museum", path=learned) == "curator"
+    examples = read_examples(log)
+    assert examples[0].was_correction is True
+    assert examples[0].model_predicted == "director"
+
+
+def test_publish_route_reports_a_failed_publish_without_learning(tmp_path: Path) -> None:
+    from mcp_server.publish import MediaWikiCredentialsError
+
+    def failing_publish(*_args: object) -> str:
+        raise MediaWikiCredentialsError()
+
+    learned = tmp_path / "learned.json"
+    app = _in_memory_app(publish_func=failing_publish, learned_aliases_path=learned)
+
+    with TestClient(app) as client:
+        response = client.post("/v1/publish", json=PUBLISH_BODY)
+
+    assert response.status_code == 502
+    assert "credentials" in response.json()["message"]
+    assert not learned.exists()
+
+
+def test_preview_result_event_carries_template_name_and_class(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("mcp_server.pipeline.predict_property", _fake_predict_property)
+    app = _in_memory_app()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/preview", json={"infobox": BRIDGE_WIKITEXT, "target_class": "Bridge"}
+        )
+        events = [
+            json.loads(line[len("data: ") :])
+            for line in response.text.splitlines()
+            if line.startswith("data: ")
+        ]
+
+    result = next(e for e in events if e["node"] == "result")
+    assert result["templateName"] == "Infobox bridge"
+    assert result["domainClass"] == "Bridge"

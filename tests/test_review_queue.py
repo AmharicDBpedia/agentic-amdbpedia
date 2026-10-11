@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -45,8 +46,16 @@ def _make_app(
     training_log_path: Path | None = None,
     publish_func: Any = None,
     refresh_mappings_func: Any = None,
+    learned_aliases_path: Path | None = None,
 ) -> Starlette:
-    kwargs: dict[str, Any] = {"engine": _in_memory_engine(), "training_log_path": training_log_path}
+    kwargs: dict[str, Any] = {
+        "engine": _in_memory_engine(),
+        "training_log_path": training_log_path,
+        "use_default_fallback": False,
+        "use_default_chat_client": False,
+        "learned_aliases_path": learned_aliases_path
+        or Path(tempfile.mkdtemp()) / "learned_aliases.json",
+    }
     if publish_func is not None:
         kwargs["publish_func"] = publish_func
     if refresh_mappings_func is not None:
@@ -615,3 +624,44 @@ async def test_review_queue_works_against_a_real_postgres_instance() -> None:
             await session.commit()
     finally:
         await real_engine.dispose()
+
+
+def _airport_review(client: TestClient) -> dict[str, Any]:
+    body: dict[str, Any] = client.post(
+        "/v1/reviews",
+        json={
+            "run_id": "run-1",
+            "template_name": "Infobox airport",
+            "domain_class": "Airport",
+            "mappings": SAMPLE_MAPPINGS,
+        },
+    ).json()
+    return body
+
+
+def test_approving_a_corrected_review_teaches_a_learned_alias(tmp_path: Path) -> None:
+    from rag.learned_aliases import lookup
+
+    learned = tmp_path / "learned_aliases.json"
+    app = _make_app(training_log_path=tmp_path / "log.jsonl", learned_aliases_path=learned)
+    corrected = [{"templateProperty": "አይካኦ_ኮድ", "ontologyProperty": "iataLocationIdentifier"}]
+
+    with TestClient(app) as client:
+        created = _airport_review(client)
+        client.post(
+            f"/v1/reviews/{created['id']}/decision",
+            json={"decision": "approved", "corrected_mappings": corrected},
+        )
+
+    assert lookup("አይካኦ_ኮድ", "Airport", path=learned) == "iataLocationIdentifier"
+
+
+def test_rejecting_a_review_teaches_nothing(tmp_path: Path) -> None:
+    learned = tmp_path / "learned_aliases.json"
+    app = _make_app(training_log_path=tmp_path / "log.jsonl", learned_aliases_path=learned)
+
+    with TestClient(app) as client:
+        created = _airport_review(client)
+        client.post(f"/v1/reviews/{created['id']}/decision", json={"decision": "rejected"})
+
+    assert not learned.exists()

@@ -108,6 +108,110 @@ def build_mapping_wikitext(domain_class: str, mappings: list[dict[str, str]]) ->
     return "\n".join(lines)
 
 
+def _field_key(name: str) -> str:
+    return "_".join(name.replace("_", " ").split()).casefold()
+
+
+class MappingMergeError(PublishError):
+    """The existing page can't be merged automatically (e.g. a ConditionalMapping)."""
+
+
+def merge_mapping_wikitext(
+    existing: str | None, domain_class: str, mappings: list[dict[str, str]]
+) -> tuple[str, dict[str, int]]:
+    """Merge `mappings` into an existing `Mapping am:` page instead of replacing it.
+
+    Publishing used to overwrite the whole page with only the rows sent from
+    the chat -- on a template that already had a mapping, that silently
+    deleted every other property mapping on the live wiki. Now:
+
+    - a field already mapped anywhere on the page (including inside an
+      IntermediateNodeMapping) keeps its place and its other parameters
+      (`unit`, `language`, ...); only `ontologyProperty` changes;
+    - a new field is appended to the top-level `mappings` list;
+    - `mapToClass` of an existing page is left as is.
+
+    Returns `(wikitext, {"added": n, "updated": n, "unchanged": n})`.
+    """
+
+    if not existing or not existing.strip():
+        return build_mapping_wikitext(domain_class, mappings), {
+            "added": len(mappings),
+            "updated": 0,
+            "unchanged": 0,
+        }
+
+    import mwparserfromhell
+
+    code = mwparserfromhell.parse(existing)
+    roots = [
+        t for t in code.filter_templates(recursive=False) if t.name.strip() == "TemplateMapping"
+    ]
+    if not roots:
+        raise MappingMergeError(
+            "The existing mapping page is not a plain TemplateMapping; edit it on the wiki instead"
+        )
+    root = roots[0]
+    if not root.has("mappings"):
+        root.add("mappings", "\n")
+
+    by_field: dict[str, Any] = {}
+    for node in root.get("mappings").value.filter_templates(recursive=True):
+        if node.name.strip() == "PropertyMapping" and node.has("templateProperty"):
+            by_field.setdefault(_field_key(str(node.get("templateProperty").value)), node)
+
+    counts = {"added": 0, "updated": 0, "unchanged": 0}
+    additions: list[str] = []
+    for mapping in mappings:
+        target: Any = by_field.get(_field_key(mapping["templateProperty"]))
+        if target is None:
+            additions.append(
+                f"  {{{{PropertyMapping | templateProperty = {mapping['templateProperty']}"
+                f" | ontologyProperty = {mapping['ontologyProperty']} }}}}"
+            )
+            counts["added"] += 1
+            continue
+        current = (
+            str(target.get("ontologyProperty").value).strip()
+            if target.has("ontologyProperty")
+            else ""
+        )
+        if current == mapping["ontologyProperty"]:
+            counts["unchanged"] += 1
+            continue
+        target.add("ontologyProperty", f" {mapping['ontologyProperty']} ")
+        counts["updated"] += 1
+
+    if additions:
+        value = root.get("mappings").value
+        text = str(value).rstrip()
+        root.get("mappings").value = text + "\n" + "\n".join(additions) + "\n"
+    return str(code), counts
+
+
+def _fetch_page_text(transport: MediaWikiTransport, title: str) -> str | None:
+    response = transport.get(
+        {
+            "action": "query",
+            "prop": "revisions",
+            "rvprop": "content",
+            "rvslots": "main",
+            "titles": title,
+            "formatversion": "2",
+            "format": "json",
+        }
+    )
+    pages = response.get("query", {}).get("pages", [])
+    if not pages or pages[0].get("missing"):
+        return None
+    revisions = pages[0].get("revisions") or []
+    if not revisions:
+        return None
+    slot = revisions[0].get("slots", {}).get("main", {})
+    content = slot.get("content", revisions[0].get("content"))
+    return str(content) if content is not None else None
+
+
 def _login(transport: MediaWikiTransport, username: str, password: str) -> None:
     token_response = transport.get(
         {"action": "query", "meta": "tokens", "type": "login", "format": "json"}
@@ -128,7 +232,25 @@ def _login(transport: MediaWikiTransport, username: str, password: str) -> None:
     )
     result = login_response.get("login", {}).get("result")
     if result != "Success":
-        raise PublishError(f"MediaWiki login failed: {result or 'unknown error'}")
+        raise PublishError(f"MediaWiki login failed: {result or _api_error(login_response)}")
+
+
+def _api_error(response: dict[str, Any]) -> str:
+    """The wiki's own reason when it answers with an API error instead of a
+    login result. mappings.dbpedia.org answers every login with
+    `writeapidenied` because anonymous users lack the `writeapi` right."""
+
+    error = response.get("error")
+    if not isinstance(error, dict):
+        return "unknown error"
+    code, info = error.get("code"), error.get("info")
+    if code == "writeapidenied":
+        return (
+            "the wiki does not allow logging in through its API (writeapidenied: "
+            "anonymous users lack the 'writeapi' right). A mappings.dbpedia.org "
+            "admin has to grant it; your bot permissions are not the problem."
+        )
+    return f"{code}: {info}" if code else "unknown error"
 
 
 def _csrf_token(transport: MediaWikiTransport) -> str:
@@ -191,8 +313,12 @@ def publish_mapping(
     )
     token = _csrf_token(resolved_transport)
     title = f"Mapping am:{template_name}"
-    wikitext = build_mapping_wikitext(domain_class, mappings)
+    existing = _fetch_page_text(resolved_transport, title)
+    wikitext, counts = merge_mapping_wikitext(existing, domain_class, mappings)
+    if existing is not None and counts["added"] == 0 and counts["updated"] == 0:
+        log_event(LOGGER, "publish.nothing_to_change", title=title)
+        return title
     _edit_page(resolved_transport, title, wikitext, summary, token)
 
-    log_event(LOGGER, "publish.completed", title=title)
+    log_event(LOGGER, "publish.completed", title=title, merged=existing is not None, **counts)
     return title

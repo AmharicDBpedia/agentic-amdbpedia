@@ -38,11 +38,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import create_review_item
 from logging_config import log_event
+from mcp_server.assistant import infer_template_class
 from mcp_server.guardrails import is_injection_attempt
 from mcp_server.publish import build_mapping_wikitext
 from mcp_server.server import MappingEntry, MappingPayload, generate_mapping_syntax_impl
+from mcp_server.wiki_fetch import canonical_template_name
 from rag.ontology import AmharicMappingIndex
-from rag.predict import PredictionResult, predict_property
+from rag.predict import PredictionResult, predict_property, production_predict_options
 
 LOGGER = logging.getLogger("dbpedia_mapping_assistant.pipeline")
 
@@ -148,11 +150,17 @@ def _parse_with_fallback(text: str) -> list[ExtractedTemplate]:
 
 def _parse_with_mwparser(text: str) -> list[ExtractedTemplate]:
     import mwparserfromhell
+    from mwparserfromhell.nodes import Template
 
     wikicode = mwparserfromhell.parse(text)
     templates: list[ExtractedTemplate] = []
 
-    for raw_template in wikicode.filter_templates(recursive=False):
+    # Recursive so a template wrapped in HTML (`<center>{{አለት ፍልፍል ...}}`,
+    # seen live on ደብረ ዳሞ) is still found, but a template nested inside
+    # another template's parameter value is not a separate candidate.
+    for raw_template in wikicode.filter_templates(recursive=True):
+        if any(isinstance(node, Template) for node in wikicode.get_ancestors(raw_template)):
+            continue
         template_name = str(raw_template.name).strip()
         fields: list[TemplateField] = []
 
@@ -181,6 +189,38 @@ def parse_templates(text: str) -> list[ExtractedTemplate]:
     return templates
 
 
+# Templates that take many named parameters but are never infoboxes.
+NON_INFOBOX_PREFIXES = (
+    "cite",
+    "citation",
+    "ዋቢ",
+    "ምንጭ",
+    "reflist",
+    "coord",
+    "lang",
+    "convert",
+    "sfn",
+    "harv",
+    "webarchive",
+    "navbox",
+    "sidebar",
+    "ሳጥን ራስጌ",
+    "ሳጥን እግርጌ",
+)
+MIN_UNNAMED_INFOBOX_FIELDS = 5
+
+
+def _looks_like_unnamed_infobox(template: ExtractedTemplate) -> bool:
+    """An infobox whose name has no marker word: many named parameters and
+    not a citation/navigation template. Seen live: `{{ስቴት|ስቴት_ስም = ...}}`
+    (ሜሪላንድ) and `{{አለት ፍልፍል|ስም = ...}}` (ደብረ ዳሞ)."""
+
+    name = template.name.replace("_", " ").strip().casefold()
+    if name.startswith(NON_INFOBOX_PREFIXES):
+        return False
+    return len(template.fields) >= MIN_UNNAMED_INFOBOX_FIELDS
+
+
 def extract_first_infobox(
     wikitext: str, *, mapping_index: AmharicMappingIndex | None = None
 ) -> ExtractedTemplate | None:
@@ -203,7 +243,14 @@ def extract_first_infobox(
             return True
         return mapping_index is not None and mapping_index.is_known_template(name)
 
-    infobox_templates = [t for t in parse_templates(wikitext) if _counts_as_infobox(t.name)]
+    templates = parse_templates(wikitext)
+    infobox_templates = [t for t in templates if _counts_as_infobox(t.name)]
+    if not infobox_templates:
+        infobox_templates = [t for t in templates if _looks_like_unnamed_infobox(t)]
+        if infobox_templates:
+            log_event(
+                LOGGER, "pipeline.unnamed_infobox_used", template_name=infobox_templates[0].name
+            )
     if not infobox_templates:
         log_event(LOGGER, "pipeline.no_infobox_found")
         return None
@@ -247,7 +294,7 @@ class PipelineState(TypedDict, total=False):
     xml_rules: str
     review_item_id: str | None
     warnings: list[str]
-    unmapped_fields: list[dict[str, str]]
+    unmapped_fields: list[dict[str, Any]]
 
 
 def _extract_node(state: PipelineState) -> dict[str, Any]:
@@ -270,6 +317,17 @@ def _extract_node(state: PipelineState) -> dict[str, Any]:
         warnings.append("No infobox-like template found in the given wikitext.")
         return {"template_name": "", "fields": [], "warnings": warnings}
 
+    # Many articles call an infobox by a redirect name ({{Infobox river}},
+    # {{ካውንቲ መረጃ}}). DBpedia resolves template redirects before looking up
+    # a mapping, so everything downstream -- the published-mapping check, the
+    # class, and the page a publish writes -- must use the real template.
+    canonical = canonical_template_name(template.name)
+    if canonical != template.name:
+        warnings.append(
+            f"Template {template.name!r} redirects to {canonical!r}; using {canonical!r}."
+        )
+        template = ExtractedTemplate(name=canonical, fields=template.fields)
+
     # Fill in a domain class from the corpus's own `mapToClass` when the
     # caller didn't give one (the Wikipedia-link preview has no
     # target-class input at all, and a bare pasted infobox often won't
@@ -284,6 +342,19 @@ def _extract_node(state: PipelineState) -> dict[str, Any]:
                 f"No target class was given -- using {detected!r} from the published "
                 f"mapping for template {template.name!r}."
             )
+        else:
+            # Measured on real articles: most Amharic infobox templates have no
+            # published mapping, so a pasted link ran with class "Thing" --
+            # no class context for the LLM, and a publish would map to
+            # owl:Thing. Groq names the class from the template; it is only
+            # kept if it is a real ontology class.
+            inferred = infer_template_class(template.name, [f.name for f in template.fields])
+            if inferred is not None:
+                updates["domain_class"] = inferred
+                warnings.append(
+                    f"No target class was given -- {inferred!r} was inferred from the "
+                    f"template name {template.name!r}; change it if that is wrong."
+                )
 
     kept_fields: list[TemplateField] = []
     skipped = 0
@@ -338,21 +409,50 @@ async def _predict_node(state: PipelineState) -> dict[str, Any]:
     domain_class = state.get("domain_class")
     warnings = list(state.get("warnings", []))
     predictions: dict[str, PredictionResult] = {}
-    unmapped_fields: list[dict[str, str]] = []
+    unmapped_fields: list[dict[str, Any]] = []
+    options = await asyncio.to_thread(production_predict_options)
+    llm_errors: set[str] = set()
 
     for field in state.get("fields", []):
         if is_injection_attempt(field.name):
             warnings.append(f"Rejected suspicious field {field.name!r} as prompt injection.")
             continue
-        outcome = await asyncio.to_thread(predict_property, field.name, target_class=domain_class)
+        outcome = await asyncio.to_thread(
+            predict_property, field.name, target_class=domain_class, **options
+        )
         if isinstance(outcome, PredictionResult):
             predictions[field.name] = outcome
+            continue
+        llm_error = getattr(outcome, "llm_error", None)
+        if llm_error:
+            llm_errors.add(llm_error)
+            warnings.append(
+                f"No confident match for {field.name!r}, and the language model could not be "
+                f"reached to try -- not the same as 'no such property'."
+            )
         else:
-            warnings.append(f"No retrieval candidates found for {field.name!r}.")
-            # Carried through to the SSE result event so the frontend can
-            # offer an in-chat "search and assign this one yourself" step
-            # rather than the field just vanishing into a warning line.
-            unmapped_fields.append({"name": field.name, "value": field.value[:80]})
+            warnings.append(f"No confident ontology property found for {field.name!r}.")
+        # Carried through to the SSE result event so the frontend can
+        # offer an in-chat "search and assign this one yourself" step
+        # rather than the field just vanishing into a warning line --
+        # pre-seeded with the ungated similarity suggestions to pick from.
+        unmapped_fields.append(
+            {
+                "name": field.name,
+                "value": field.value[:80],
+                "suggestions": [
+                    {"property": s.property, "class": s.ontology_class, "score": s.score}
+                    for s in getattr(outcome, "suggestions", ())
+                ],
+            }
+        )
+
+    if llm_errors:
+        warnings.append(
+            "Language model unavailable for this run ("
+            + " | ".join(sorted(llm_errors))
+            + "). Start Ollama (`ollama serve`, model gemma2:9b) or check GROQ_API_KEY."
+        )
 
     return {
         "predictions": predictions,
@@ -368,7 +468,10 @@ def _format_node(state: PipelineState) -> dict[str, Any]:
 
     mappings: list[dict[str, Any]] = []
     for name, prediction in predictions.items():
-        if prediction.llm_proposed:
+        if prediction.method == "learned":
+            confidence = 1.0
+            source = "learned"
+        elif prediction.llm_proposed:
             # No retrieval score to report -- a fixed low-but-not-zero
             # confidence so the row reads as "weak guess, check this" rather
             # than "0%, definitely wrong".
@@ -376,7 +479,8 @@ def _format_node(state: PipelineState) -> dict[str, Any]:
             source = "llm"
             warnings.append(
                 f"Proposed {prediction.property!r} for {name!r} with the language model "
-                f"(no retrieval match) -- verify before approving."
+                f"({prediction.model or 'LLM'}, no confident retrieval match) -- verify "
+                f"before publishing."
             )
         else:
             confidence = (
@@ -455,7 +559,7 @@ NODE_LABELS: dict[str, str] = {
     "extract_infobox_fields": "Extracting infobox fields",
     "predict_properties": "Predicting ontology properties",
     "format_mapping_syntax": "Generating mapping XML",
-    "persist_review_item": "Saving to review queue",
+    "persist_review_item": "Saving run record",
 }
 
 
@@ -501,7 +605,7 @@ class PipelineResult:
     mapping_wikitext: str
     xml_rules: str
     warnings: list[str]
-    unmapped_fields: list[dict[str, str]]
+    unmapped_fields: list[dict[str, Any]]
     review_item_id: str | None
 
 
@@ -648,6 +752,11 @@ async def stream_mapping_pipeline(
     # for every other field this event already carries.
     yield {
         "node": "result",
+        # Needed to publish straight from the chat: the page written is
+        # `Mapping am:<templateName>`, mapped to `domainClass` (which
+        # `_extract_node` may have derived from the template itself).
+        "templateName": state.get("template_name"),
+        "domainClass": state.get("domain_class") or domain_class,
         "mappings": state.get("mappings", []),
         "mappingWikitext": state.get("mapping_wikitext", ""),
         "xmlRules": state.get("xml_rules", ""),

@@ -7,18 +7,23 @@ set; here candidates come from `rag.retrieval.search()` instead — the same
 real ontology corpus, dense+sparse retrieval, and confidence logic already
 used everywhere else in this repo.
 
-The retriever alone already picks a top-1 answer; this module lets a local
-LLM (Gemma 2 9B by default, via Ollama/LiteLLM) rerank among the retriever's
-own top-k candidates. It is an enhancement, never a dependency: a missing
-or unreachable Ollama, or an open circuit breaker, degrades to the
-retriever's own top-1 choice with `used_llm=False` rather than a failed
-request (refs 11.2).
+The retriever alone already picks a top-1 answer; this module lets an LLM
+rerank among the retriever's own top-k candidates and, when retrieval finds
+nothing confident (the normal case for Amharic vocabulary not in the
+corpus), propose or select a property itself. Every LLM call runs on a
+model chain -- by default the local Gemma 2 9B via Ollama, then the hosted
+fallback from `Settings.predict_model_chain()` (Groq) -- so an unreachable
+Ollama no longer silently disables the whole layer. It is still an
+enhancement, never a dependency: when every model fails, or the circuit
+breaker is open, prediction degrades to the retriever's own top-1 choice
+(or an explicit no-candidates result carrying `llm_error`) rather than a
+failed request (refs 11.2).
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -162,34 +167,135 @@ def _build_dspy_program() -> DspyProgram:
     return SelectFromCandidates(dspy.Predict(PropertyMappingMC))
 
 
-# dspy.LM defaults to num_retries=3 with no timeout, which means a
-# genuinely down local Ollama (the common case in dev/CI, where nothing
-# is listening on :11434) can burn tens of seconds retrying a doomed
-# connection before predict_property() ever gets to fall back to the
-# retriever's own top-1 result. A short, explicit timeout with no retries
-# makes that fallback fast instead of merely eventual -- an LLM that's
-# actually up and reachable still comes back well inside 3s in practice;
-# one that isn't now fails in ~3s flat instead of ~3 retries' worth of
-# backoff, and the caller's own RetrievalCircuitBreaker still absorbs
-# repeated failures across calls on top of this.
-LLM_CALL_TIMEOUT_SECONDS = 3.0
+def _build_select_or_none_program() -> DspyProgram:
+    """Rerank for candidates that did NOT pass retrieval's confidence gate.
+
+    Unlike `_build_dspy_program` (whose candidates are already
+    high-confidence, so it must always pick one), these come from
+    `rag.retrieval.suggest` -- the ungated dense top-k -- and frequently
+    contain no correct answer at all. Without an explicit way out, the
+    measured behaviour was to pick *something* even for nonsense ("the
+    cat's favourite colour" -> `colour`, a prompt injection ->
+    `administrator`). `_snap_or_none` turns "none" or any answer outside the
+    candidate list into `None`."""
+
+    import dspy
+
+    class SelectPropertyOrNone(dspy.Signature):  # type: ignore[misc]
+        """Pick the DBpedia ontology property that an (often Amharic)
+        infobox field expresses. The premise has the form "<entity type>'s
+        <field name>". The candidates were found by a similarity search and
+        are NOT verified: they may all be wrong. Answer with exactly one
+        candidate copied verbatim if it clearly means the same thing as the
+        field for that entity type; otherwise answer exactly "none"."""
+
+        premise: str = dspy.InputField()
+        candidates: str = dspy.InputField()
+        property_class: str = dspy.OutputField()
+
+    return cast("DspyProgram", dspy.Predict(SelectPropertyOrNone))
+
+
+NONE_ANSWERS = {"", "none", "null", "n/a", "no match"}
+
+
+def _snap_or_none(answer: str, candidates: list[str]) -> str | None:
+    """Like `snap_to_candidate`, but an unrecognised or "none" answer means
+    "no property" rather than "the first candidate"."""
+
+    cleaned = str(answer).strip().strip("\"'`.").split(":")[-1].strip()
+    if _normalize(cleaned) in NONE_ANSWERS or not candidates:
+        return None
+    best = max(candidates, key=lambda candidate: fuzz.token_sort_ratio(candidate, cleaned))
+    if _normalize(best) == _normalize(cleaned) or fuzz.token_sort_ratio(best, cleaned) >= (
+        FUZZY_THRESHOLD
+    ):
+        return best
+    return None
+
+
+# Default per-call timeout. Gemma 2 9B on a CPU-only machine needs several
+# seconds per answer (and far longer on the first call, while Ollama loads
+# the weights); a hosted fallback answers in well under that. A genuinely
+# down Ollama still fails instantly (connection refused), so a generous
+# timeout doesn't slow down the fallback to the next model. The pipeline
+# passes `Settings.predict_llm_timeout_seconds` explicitly.
+LLM_CALL_TIMEOUT_SECONDS = 60.0
+# Hosted models (Groq) rate-limit bursts -- measured: ~75% of an unpaced
+# burst of calls failed with RateLimitError on the free tier. LiteLLM's own
+# retry-with-backoff absorbs that; a local Ollama gets no retries, since a
+# refused connection won't succeed on retry.
+REMOTE_MODEL_RETRIES = 3
+
+
+class LLMUnavailableError(RuntimeError):
+    """Every model in the chain failed (unreachable, timed out, rate-limited)."""
+
+
+def _retries_for(model: str) -> int:
+    return 0 if resolve_model(model).startswith(("ollama", "ollama_chat")) else REMOTE_MODEL_RETRIES
+
+
+def _run_on_model_chain(
+    models: tuple[str, ...],
+    invoke: Callable[[], Any],
+    *,
+    timeout: float,
+    max_tokens: int,
+) -> tuple[Any, str]:
+    """Run `invoke()` under each model in turn until one succeeds.
+
+    Returns `(result, model_used)`. Raises `LLMUnavailableError` naming
+    every model's failure when none succeeds. Responses are never served
+    from DSPy's on-disk cache, so every answer is a real model call."""
+
+    import dspy
+
+    failures: list[str] = []
+    for model in models:
+        lm = dspy.LM(
+            resolve_model(model),
+            temperature=0.0,
+            max_tokens=max_tokens,
+            num_retries=_retries_for(model),
+            timeout=timeout,
+            cache=False,
+        )
+        try:
+            with dspy.context(lm=lm):
+                return invoke(), model
+        except Exception as exc:  # noqa: BLE001 - try the next model in the chain
+            failures.append(f"{model}: {exc.__class__.__name__}")
+            log_event(LOGGER, "predict.model_failed", model=model, error=exc.__class__.__name__)
+    raise LLMUnavailableError("; ".join(failures) or "no LLM models configured")
+
+
+def _premise(amharic_property: str, target_class: str | None) -> str:
+    """The "<entity type>'s <property mention>" form every prompt documents.
+
+    Without the class, "ቁመት" (height) on a Person and "ከፍታ" (height) on a
+    Lake (whose DBpedia property is `elevation`) are indistinguishable."""
+
+    return f"{target_class}'s {amharic_property}" if target_class else amharic_property
 
 
 def _call_dspy(
-    program: DspyProgram, amharic_property: str, candidates: list[str], model_alias: str
+    program: DspyProgram,
+    amharic_property: str,
+    candidates: list[str],
+    model_alias: str,
+    *,
+    timeout: float = LLM_CALL_TIMEOUT_SECONDS,
 ) -> str:
-    import dspy
+    """Single-model rerank call; kept for scripts that call it directly."""
 
-    lm = dspy.LM(
-        resolve_model(model_alias),
-        temperature=0.0,
+    answer, _model = _run_on_model_chain(
+        (model_alias,),
+        lambda: program(premise=amharic_property, candidates="; ".join(candidates)),
+        timeout=timeout,
         max_tokens=256,
-        num_retries=0,
-        timeout=LLM_CALL_TIMEOUT_SECONDS,
     )
-    with dspy.context(lm=lm):
-        prediction = program(premise=amharic_property, candidates="; ".join(candidates))
-    return prediction.property_class
+    return str(answer.property_class)
 
 
 _ONTOLOGY_CATALOG: DbpediaOntologyCatalog | None = None
@@ -247,21 +353,43 @@ def _build_propose_program() -> ProposeProgram:
     return cast("ProposeProgram", dspy.Predict(ProposePropertyFromField))
 
 
-def _call_propose_dspy(
-    program: ProposeProgram, field_mention: str, entity_type: str, model_alias: str
-) -> str:
-    import dspy
+def _propose_with_chain(
+    amharic_property: str,
+    *,
+    target_class: str | None,
+    models: tuple[str, ...],
+    timeout: float,
+    program: ProposeProgram | None,
+    catalog: OntologyLookup | None,
+) -> tuple[str | None, str | None]:
+    """`(validated property or None, model that answered or None)`.
 
-    lm = dspy.LM(
-        resolve_model(model_alias),
-        temperature=0.0,
+    Raises `LLMUnavailableError` when no model could be reached."""
+
+    resolved_catalog = catalog if catalog is not None else _ontology_catalog()
+    if resolved_catalog is None:
+        return None, None
+
+    resolved_program = program if program is not None else _build_propose_program()
+    prediction, model = _run_on_model_chain(
+        models,
+        lambda: resolved_program(
+            field_mention=amharic_property, entity_type=target_class or "Thing"
+        ),
+        timeout=timeout,
         max_tokens=64,
-        num_retries=0,
-        timeout=LLM_CALL_TIMEOUT_SECONDS,
     )
-    with dspy.context(lm=lm):
-        prediction = program(field_mention=field_mention, entity_type=entity_type or "Thing")
-    return prediction.property_class
+
+    answer = str(prediction.property_class).strip().strip("\"'").lstrip(":").split(":")[-1].strip()
+    if not answer or answer.casefold() == "none":
+        return None, model
+
+    match = resolved_catalog.find(answer)
+    if match is None:
+        log_event(LOGGER, "predict.propose_rejected", answer=answer)
+        return None, model
+    log_event(LOGGER, "predict.proposed", property=match.local_name, model=model)
+    return str(match.local_name), model
 
 
 def propose_property(
@@ -269,33 +397,30 @@ def propose_property(
     *,
     target_class: str | None = None,
     model_alias: str = DEFAULT_MODEL_ALIAS,
+    model_chain: Sequence[str] | None = None,
+    timeout: float = LLM_CALL_TIMEOUT_SECONDS,
     program: ProposeProgram | None = None,
     catalog: OntologyLookup | None = None,
 ) -> str | None:
     """Ask the LLM to name a DBpedia property outright, then keep the answer
     only if it's a real ontology property. Returns the property's canonical
     local name, or `None` (LLM said "none", the catalog is unavailable, or
-    the answer isn't a real property)."""
+    the answer isn't a real property). Raises `LLMUnavailableError` when no
+    model in the chain could be reached.
 
-    resolved_catalog = catalog if catalog is not None else _ontology_catalog()
-    if resolved_catalog is None:
-        return None
+    Measured on 51 unseen Amharic field names via Groq: 34 correct, 1 wrong,
+    16 abstained -- and "none" for all four nonsense/injection inputs."""
 
-    resolved_program = program if program is not None else _build_propose_program()
-    answer = _call_propose_dspy(
-        resolved_program, amharic_property, target_class or "Thing", model_alias
+    models = tuple(model_chain) if model_chain else (model_alias,)
+    proposed, _model = _propose_with_chain(
+        amharic_property,
+        target_class=target_class,
+        models=models,
+        timeout=timeout,
+        program=program,
+        catalog=catalog,
     )
-
-    answer = answer.strip().strip("\"'").lstrip(":").split(":")[-1].strip()
-    if not answer or answer.casefold() == "none":
-        return None
-
-    match = resolved_catalog.find(answer)
-    if match is None:
-        log_event(LOGGER, "predict.propose_rejected", answer=answer)
-        return None
-    log_event(LOGGER, "predict.proposed", property=match.local_name)
-    return match.local_name
+    return proposed
 
 
 @dataclass(frozen=True)
@@ -307,23 +432,49 @@ class PredictionResult:
     candidates: list[str]
     top_retrieval_result: SearchResult | None
     reason: str = ""
-    # True only for the propose-from-scratch path below: retrieval found
-    # *no* candidates at all and the LLM named a property that was then
-    # validated against the real ontology catalog. Distinct from
-    # `used_llm` (which also covers the ordinary rerank-among-candidates
-    # case) so a caller can flag these rows as "needs a closer look".
+    # True for both LLM-only paths below (propose-from-scratch, and
+    # select-among-unverified-suggestions): retrieval itself had *no*
+    # confident candidate, so a caller should flag the row as "needs a
+    # closer look". Distinct from `used_llm`, which also covers the
+    # ordinary rerank among confident candidates.
     llm_proposed: bool = False
+    # How the property was chosen: "retrieval", "rerank", "learned",
+    # "llm_propose" or "llm_select".
+    method: str = "retrieval"
+    # Which model in the chain actually answered, if any.
+    model: str | None = None
 
 
 @dataclass(frozen=True)
 class NoCandidatesFound:
     query: str
     reason: str = "No retrieval candidates to rerank"
+    # Ungated dense top-3, for a human to pick from. Never auto-accepted.
+    suggestions: tuple[SearchResult, ...] = ()
+    # Set when the LLM layer was wanted but no model could be reached, so
+    # callers can say "not attempted" instead of implying "no such property".
+    llm_error: str | None = None
 
 
 PredictOutcome = PredictionResult | NoCandidatesFound
 
+SuggestFunc = Callable[..., list[SearchResult]]
+LearnedLookup = Callable[[str, str | None], str | None]
+
 DEFAULT_PREDICT_CIRCUIT_BREAKER = RetrievalCircuitBreaker()
+SUGGESTIONS_SHOWN = 3
+
+
+def _safe_suggest(
+    suggest_func: SuggestFunc | None, query: str, target_class: str | None, limit: int
+) -> list[SearchResult]:
+    if suggest_func is None:
+        return []
+    try:
+        return list(suggest_func(query, target_class=target_class, limit=limit))
+    except Exception as exc:  # noqa: BLE001 - suggestions are optional
+        log_event(LOGGER, "predict.suggest_failed", error=exc.__class__.__name__)
+        return []
 
 
 def predict_property(
@@ -331,58 +482,78 @@ def predict_property(
     *,
     target_class: str | None = None,
     model_alias: str = DEFAULT_MODEL_ALIAS,
+    model_chain: Sequence[str] | None = None,
+    timeout: float = LLM_CALL_TIMEOUT_SECONDS,
     top_k: int = DEFAULT_TOP_K,
     program: DspyProgram | None = None,
     circuit_breaker: RetrievalCircuitBreaker | None = DEFAULT_PREDICT_CIRCUIT_BREAKER,
     search_func: SearchFunc = search,
+    suggest_func: SuggestFunc | None = None,
+    learned_lookup: LearnedLookup | None = None,
     enable_propose: bool = True,
     propose_program: ProposeProgram | None = None,
+    select_program: DspyProgram | None = None,
     catalog: OntologyLookup | None = None,
 ) -> PredictOutcome:
-    """Retrieve top-k candidates, then let an LLM rerank among them.
+    """Choose a DBpedia property for one infobox field.
 
-    `program` overrides the real DSPy program construction, and
-    `search_func` overrides `rag.retrieval.search` itself — both used by
-    tests to run this fully offline, without a live Ollama instance or the
-    real embedding-model-backed retrieval index.
+    In order:
 
-    When retrieval finds *no* candidates at all, and `enable_propose` is on
-    and the circuit breaker allows it, one propose-from-scratch LLM call
-    (`propose_property`) gets a validated guess rather than giving up
-    outright — returned as a `PredictionResult` with `llm_proposed=True`
-    and no `top_retrieval_result`.
+    1. `learned_lookup` -- a human already approved this field for this
+       class (`rag.learned_aliases`). Returned as-is, no LLM.
+    2. `search_func` (hybrid retrieval, gated). If it finds confident
+       candidates, the LLM reranks only those, with the target class in the
+       premise. Any LLM failure keeps the retriever's top-1. Unverified
+       alternatives are deliberately *not* appended here: measured live, that
+       let the LLM override a correct curated answer
+       (`የድህረ_ምረቃ_ተማሪዎች` -> numberOfGraduateStudents) as often as it fixed
+       a cross-class one. A cross-class alias (a Hospital's staff count on a
+       Company) is fixed by one reviewer correction instead -- step 1.
+    3. Otherwise, when `enable_propose` and the circuit breaker allow it:
+       a. propose-from-scratch (validated against the real ontology; may
+          answer "none"), then
+       b. if it abstained, select among `suggest_func`'s ungated dense
+          top-k with an explicit "none" option.
+       Measured live on 51 unseen field names: 2 correct before, 40 after.
+    4. Else `NoCandidatesFound`, carrying the dense top-3 as suggestions and
+       `llm_error` when no model could be reached.
+
+    `model_chain` is tried in order for every LLM call (default: just
+    `model_alias`). `program`, `propose_program`, `select_program`,
+    `search_func`, `suggest_func` and `learned_lookup` exist so tests run
+    fully offline.
     """
+
+    models = tuple(model_chain) if model_chain else (model_alias,)
+
+    if learned_lookup is not None:
+        learned = learned_lookup(amharic_property, target_class)
+        if learned:
+            log_event(LOGGER, "predict.learned_alias", property=learned)
+            return PredictionResult(
+                property=learned,
+                used_llm=False,
+                candidates=[learned],
+                top_retrieval_result=None,
+                reason="Learned from an approved review",
+                method="learned",
+            )
 
     results = search_func(amharic_property, target_class=target_class, limit=top_k)
     scored = [result for result in results if isinstance(result, SearchResult)]
     if not scored:
-        allow_llm = circuit_breaker is None or circuit_breaker.allow_request()
-        if not (enable_propose and allow_llm):
-            return NoCandidatesFound(query=amharic_property)
-        try:
-            proposed = propose_property(
-                amharic_property,
-                target_class=target_class,
-                model_alias=model_alias,
-                program=propose_program,
-                catalog=catalog,
-            )
-        except Exception as exc:  # noqa: BLE001 - same degradation as a rerank failure
-            if circuit_breaker is not None:
-                circuit_breaker.record_failure()
-            log_event(LOGGER, "predict.propose_unavailable", error=exc.__class__.__name__)
-            return NoCandidatesFound(query=amharic_property)
-        if circuit_breaker is not None:
-            circuit_breaker.record_success()
-        if proposed is None:
-            return NoCandidatesFound(query=amharic_property)
-        return PredictionResult(
-            property=proposed,
-            used_llm=True,
-            candidates=[proposed],
-            top_retrieval_result=None,
-            reason="LLM-proposed (no retrieval candidates)",
-            llm_proposed=True,
+        return _predict_without_candidates(
+            amharic_property,
+            target_class=target_class,
+            models=models,
+            timeout=timeout,
+            top_k=top_k,
+            circuit_breaker=circuit_breaker,
+            suggest_func=suggest_func,
+            enable_propose=enable_propose,
+            propose_program=propose_program,
+            select_program=select_program,
+            catalog=catalog,
         )
 
     candidates = [result.property for result in scored]
@@ -400,7 +571,14 @@ def predict_property(
 
     try:
         resolved_program = program if program is not None else _build_dspy_program()
-        chosen = _call_dspy(resolved_program, amharic_property, candidates, model_alias)
+        prediction, model = _run_on_model_chain(
+            models,
+            lambda: resolved_program(
+                premise=_premise(amharic_property, target_class), candidates="; ".join(candidates)
+            ),
+            timeout=timeout,
+            max_tokens=256,
+        )
     except Exception as exc:
         if circuit_breaker is not None:
             circuit_breaker.record_failure()
@@ -410,12 +588,143 @@ def predict_property(
             used_llm=False,
             candidates=candidates,
             top_retrieval_result=top_result,
-            reason=f"LLM reranking unavailable: {exc.__class__.__name__}",
+            reason=f"LLM reranking unavailable: {exc}",
         )
 
     if circuit_breaker is not None:
         circuit_breaker.record_success()
-    log_event(LOGGER, "predict.llm_reranked", model=model_alias)
+    chosen = snap_to_candidate(str(prediction.property_class), candidates)
+    log_event(LOGGER, "predict.llm_reranked", model=model)
     return PredictionResult(
-        property=chosen, used_llm=True, candidates=candidates, top_retrieval_result=top_result
+        property=chosen,
+        used_llm=True,
+        candidates=candidates,
+        top_retrieval_result=top_result,
+        method="rerank",
+        model=model,
     )
+
+
+def _predict_without_candidates(
+    amharic_property: str,
+    *,
+    target_class: str | None,
+    models: tuple[str, ...],
+    timeout: float,
+    top_k: int,
+    circuit_breaker: RetrievalCircuitBreaker | None,
+    suggest_func: SuggestFunc | None,
+    enable_propose: bool,
+    propose_program: ProposeProgram | None,
+    select_program: DspyProgram | None,
+    catalog: OntologyLookup | None,
+) -> PredictOutcome:
+    suggestions = _safe_suggest(suggest_func, amharic_property, target_class, top_k)
+    shown = tuple(suggestions[:SUGGESTIONS_SHOWN])
+
+    allow_llm = circuit_breaker is None or circuit_breaker.allow_request()
+    if not enable_propose:
+        return NoCandidatesFound(query=amharic_property, suggestions=shown)
+    if not allow_llm:
+        return NoCandidatesFound(
+            query=amharic_property,
+            suggestions=shown,
+            llm_error="LLM temporarily disabled after repeated failures",
+        )
+
+    try:
+        proposed, model = _propose_with_chain(
+            amharic_property,
+            target_class=target_class,
+            models=models,
+            timeout=timeout,
+            program=propose_program,
+            catalog=catalog,
+        )
+        if proposed is None and suggestions:
+            names = [s.property for s in suggestions]
+            resolved_select = (
+                select_program if select_program is not None else _build_select_or_none_program()
+            )
+            answer, model = _run_on_model_chain(
+                models,
+                lambda: resolved_select(
+                    premise=_premise(amharic_property, target_class), candidates="; ".join(names)
+                ),
+                timeout=timeout,
+                max_tokens=64,
+            )
+            selected = _snap_or_none(str(answer.property_class), names)
+            if selected is not None:
+                if circuit_breaker is not None:
+                    circuit_breaker.record_success()
+                log_event(LOGGER, "predict.llm_selected", property=selected, model=model)
+                return PredictionResult(
+                    property=selected,
+                    used_llm=True,
+                    candidates=names,
+                    top_retrieval_result=None,
+                    reason="LLM-selected from unverified similarity suggestions",
+                    llm_proposed=True,
+                    method="llm_select",
+                    model=model,
+                )
+    except Exception as exc:  # noqa: BLE001 - same degradation as a rerank failure
+        if circuit_breaker is not None:
+            circuit_breaker.record_failure()
+        log_event(LOGGER, "predict.propose_unavailable", error=exc.__class__.__name__)
+        return NoCandidatesFound(query=amharic_property, suggestions=shown, llm_error=str(exc))
+
+    if circuit_breaker is not None:
+        circuit_breaker.record_success()
+    if proposed is None:
+        return NoCandidatesFound(query=amharic_property, suggestions=shown)
+    return PredictionResult(
+        property=proposed,
+        used_llm=True,
+        candidates=[proposed],
+        top_retrieval_result=None,
+        reason="LLM-proposed (no retrieval candidates)",
+        llm_proposed=True,
+        method="llm_propose",
+        model=model,
+    )
+
+
+def production_predict_options() -> dict[str, Any]:
+    """`predict_property` keyword arguments for the running application.
+
+    Reads the model chain and timeout from `Settings` (`PREDICT_MODEL`,
+    `PREDICT_FALLBACK_MODEL`, `PREDICT_LLM_TIMEOUT_SECONDS`) and wires in the
+    real ungated suggestions and learned-alias lookup. Settings that can't
+    be loaded (no `.env` in a test or CI environment) degrade to the local
+    default model only, instead of failing the request.
+
+    LiteLLM reads provider keys from the process environment, not from
+    `Settings`, so a `GROQ_API_KEY` that only lives in `.env` (e.g. the
+    server started without `just`'s dotenv-load) is exported here for the
+    hosted fallback to authenticate.
+    """
+
+    import os
+
+    from config import DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS, DEFAULT_PREDICT_MODEL, Settings
+    from rag import learned_aliases
+    from rag.retrieval import suggest
+
+    chain: tuple[str, ...] = (DEFAULT_PREDICT_MODEL,)
+    timeout = DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS
+    try:
+        settings = Settings()
+        chain = settings.predict_model_chain()
+        timeout = settings.predict_llm_timeout_seconds
+        if settings.groq_api_key:
+            os.environ.setdefault("GROQ_API_KEY", settings.groq_api_key)
+    except Exception as exc:  # noqa: BLE001 - fall back to the local default model
+        log_event(LOGGER, "predict.settings_unavailable", error=exc.__class__.__name__)
+    return {
+        "model_chain": chain,
+        "timeout": timeout,
+        "suggest_func": suggest,
+        "learned_lookup": learned_aliases.lookup,
+    }
