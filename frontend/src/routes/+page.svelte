@@ -1,12 +1,13 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import {
 		BackendUnavailableError,
-		DecisionFailedError,
-		decideReview,
+		PublishFailedError,
 		findSemanticMatch,
 		looksLikeWikipediaUrl,
-		previewMapping
+		previewMapping,
+		publishMapping,
+		summarizeResult,
+		understandInput
 	} from '$lib/api';
 	import {
 		type PipelineTurn,
@@ -15,21 +16,13 @@
 		ensureActiveSession,
 		touchSession
 	} from '$lib/chat.svelte';
-	import type { MappingCandidate } from '$lib/types';
+	import type { MappingCandidate, PredictedMapping } from '$lib/types';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Textarea } from '$lib/components/ui/textarea/index.js';
-	import {
-		Table,
-		TableBody,
-		TableCell,
-		TableHead,
-		TableHeader,
-		TableRow
-	} from '$lib/components/ui/table/index.js';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import ConfidencePill from '$lib/components/ConfidencePill.svelte';
-	import StatusBadge from '$lib/components/StatusBadge.svelte';
+	import MappingEditor from '$lib/components/MappingEditor.svelte';
 	import StepTracker from '$lib/components/StepTracker.svelte';
 	import ThinkingIndicator from '$lib/components/ThinkingIndicator.svelte';
 	import logo from '$lib/assets/dbpedia-am-logo.png';
@@ -37,9 +30,7 @@
 	import { toast } from 'svelte-sonner';
 	import {
 		faArrowUp,
-		faArrowRight,
 		faCircleCheck,
-		faCircleXmark,
 		faCloudUploadAlt,
 		faSpinner
 	} from '@fortawesome/free-solid-svg-icons';
@@ -47,6 +38,8 @@
 	let input = $state('');
 	let targetClass = $state('');
 	let busy = $state(false);
+	// The message Groq is reading right now (before we know its turn kind).
+	let understanding = $state<string | null>(null);
 	let scrollAnchor: HTMLDivElement | undefined = $state();
 
 	const turns = $derived(currentSession()?.turns ?? []);
@@ -99,12 +92,20 @@
 		}
 	}
 
-	// Auto-predicted rows plus any the reviewer assigned by hand -- the set
-	// that gets approved and, later, published.
-	const rowsFor = (turn: PipelineTurn) => [
-		...(turn.mappings ?? []),
-		...(turn.manualMappings ?? [])
-	];
+	// The rows shown in the editable table and sent on publish. Chats saved
+	// before in-chat editing kept hand-assigned rows in `manualMappings`.
+	const rowsFor = (turn: PipelineTurn): PredictedMapping[] =>
+		turn.edited ?? [...(turn.mappings ?? []), ...(turn.manualMappings ?? [])];
+
+	function ensureEdited(turn: PipelineTurn): PredictedMapping[] {
+		if (!turn.edited) turn.edited = rowsFor(turn).map((row) => ({ ...row }));
+		return turn.edited;
+	}
+
+	// Splits Groq's reply on `backticks` so property names render as code
+	// without ever injecting HTML.
+	const feedbackParts = (message: string) =>
+		message.split('`').map((text, index) => ({ text, code: index % 2 === 1 }));
 
 	function attachManualMapping(
 		turn: PipelineTurn,
@@ -112,38 +113,24 @@
 		property: string,
 		score: number
 	) {
-		turn.manualMappings = [
-			...(turn.manualMappings ?? []),
-			{
-				templateProperty: fieldName,
-				ontologyProperty: property,
-				confidence: score,
-				source: 'manual'
-			}
-		];
+		ensureEdited(turn).push({
+			templateProperty: fieldName,
+			ontologyProperty: property,
+			confidence: score,
+			source: 'manual'
+		});
 		turn.unmappedFields = (turn.unmappedFields ?? []).filter((f) => f.name !== fieldName);
 		delete assignByField[assignKey(turn.id, fieldName)];
 		const session = currentSession();
 		if (session) touchSession(session.id);
 	}
 
-	function looksLikeInfobox(text: string): boolean {
-		return /\{\{\s*infobox/i.test(text) || text.trim().startsWith('{{');
-	}
-
-	// A Wikipedia link runs the exact same extract → predict → format →
-	// persist pipeline as a pasted infobox -- the backend just fetches the
-	// article's wikitext first (mcp_server/wiki_fetch.py) and hands it to
-	// the same extract_first_infobox() call, which already finds "the
-	// first infobox-like template" in arbitrarily larger wikitext. So this
-	// only needs to decide routing, not build a third turn kind.
-	function runsThePipeline(text: string): boolean {
-		return looksLikeInfobox(text) || looksLikeWikipediaUrl(text);
-	}
-
 	function scrollToBottom() {
 		requestAnimationFrame(() => scrollAnchor?.scrollIntoView({ behavior: 'smooth', block: 'end' }));
 	}
+
+	const unreachable =
+		'cross-lingual is not reachable — check that the HTTP server (just run-http) is running.';
 
 	async function submit(text?: string) {
 		const value = (text ?? input).trim();
@@ -155,38 +142,40 @@
 		const id = crypto.randomUUID();
 		const wantsClass = targetClass.trim() || undefined;
 
-		if (runsThePipeline(value)) {
+		// 1. Groq reads the message: infobox, link, or a field (possibly
+		//    inside a question), and which DBpedia class it belongs to.
+		understanding = value;
+		scrollToBottom();
+		const plan = await understandInput(value, wantsClass);
+		understanding = null;
+		const cls = plan.target_class ?? wantsClass;
+
+		if (plan.intent === 'url' || plan.intent === 'infobox') {
 			session.turns.push({
 				id,
 				kind: 'pipeline',
 				input: value,
-				targetClass: wantsClass,
+				targetClass: cls,
 				steps: [],
 				mappings: null,
 				running: true
 			});
-			// `session` is an element of the `sessions` $state array, and
-			// Svelte 5 wraps a plain object in its own reactive proxy the
-			// moment it's inserted into a $state container -- that proxy,
-			// not the object literal above, is what the template actually
-			// reads. Re-reading the just-pushed element by reference here
-			// (rather than continuing to mutate the object literal) is what
-			// makes every mutation below actually reach the DOM; mutating
-			// the pre-push literal directly is silently invisible to Svelte
-			// (confirmed live: the "Thinking…" indicator never clears,
-			// steps/mappings never appear, because turn.steps/turn.mappings
-			// assignments were landing on a detached object nothing was
-			// still watching).
+			// Re-read the pushed element: Svelte 5 proxies objects inserted
+			// into $state, and only the proxy's mutations reach the DOM.
 			const turn = session.turns[session.turns.length - 1] as PipelineTurn;
 			touchSession(session.id);
 			scrollToBottom();
 			try {
-				for await (const event of previewMapping(value, wantsClass)) {
+				// 2. The mapping itself: retrieval + Gemma (Ollama).
+				for await (const event of previewMapping(plan.text, cls)) {
 					if ('mappings' in event) {
 						turn.mappings = event.mappings;
+						turn.edited = event.mappings.map((row) => ({ ...row }));
 						turn.mappingWikitext = event.mappingWikitext;
 						turn.xmlRules = event.xmlRules;
 						turn.reviewItemId = event.reviewItemId;
+						turn.templateName = event.templateName ?? null;
+						turn.domainClass = event.domainClass ?? cls;
 						turn.warnings = event.warnings ?? [];
 						turn.unmappedFields = event.unmappedFields ?? [];
 					} else {
@@ -194,11 +183,23 @@
 					}
 					scrollToBottom();
 				}
+				// 3. Groq turns the result into the final reply.
+				if (turn.mappings) {
+					turn.feedback = await summarizeResult(
+						'infobox',
+						{
+							domainClass: turn.domainClass,
+							mappings: turn.mappings,
+							unmappedFields: turn.unmappedFields
+						},
+						plan.language
+					);
+				}
 			} catch (err) {
 				console.error('Mapping pipeline failed:', err);
 				turn.error =
 					err instanceof BackendUnavailableError
-						? 'cross-lingual is not reachable — check that the HTTP server (just run-http) is running.'
+						? unreachable
 						: `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
 			} finally {
 				turn.running = false;
@@ -209,35 +210,46 @@
 				id,
 				kind: 'answer',
 				input: value,
-				targetClass: wantsClass,
+				targetClass: cls,
+				field: plan.intent === 'field' && plan.text !== value ? plan.text : undefined,
 				matches: null,
 				noMatch: false,
-				running: true
+				running: plan.intent === 'field'
 			});
-			// See the comment above the pipeline branch's push -- same fix,
-			// same reason.
 			const turn = session.turns[session.turns.length - 1] as AnswerTurn;
 			touchSession(session.id);
 			scrollToBottom();
-			try {
-				const result = await findSemanticMatch(value, wantsClass);
-				if (result.status === 'rejected') {
-					turn.error = result.message ?? 'Rejected: prompt-injection attempt detected.';
-				} else if (result.status === 'no_match') {
-					turn.noMatch = true;
-				} else {
-					turn.matches = result.matches;
+			if (plan.intent === 'rejected') {
+				turn.error = plan.reply ?? 'Rejected: prompt-injection attempt detected.';
+			} else if (plan.intent === 'unsupported') {
+				turn.reply = plan.reply ?? 'Paste an infobox, a Wikipedia link, or a field name.';
+			} else {
+				try {
+					const result = await findSemanticMatch(plan.text, cls);
+					if (result.status === 'rejected') {
+						turn.error = result.message ?? 'Rejected: prompt-injection attempt detected.';
+					} else {
+						if (result.status === 'no_match') {
+							turn.noMatch = true;
+							turn.suggestions = result.suggestions ?? [];
+							turn.llmUnavailable = Boolean(result.llm_error);
+						} else {
+							turn.matches = result.matches;
+						}
+						turn.feedback = await summarizeResult('field', result, plan.language);
+					}
+				} catch (err) {
+					console.error('Assistant lookup failed:', err);
+					turn.error =
+						err instanceof BackendUnavailableError
+							? unreachable
+							: `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
+				} finally {
+					turn.running = false;
+					touchSession(session.id);
 				}
-			} catch (err) {
-				console.error('Assistant lookup failed:', err);
-				turn.error =
-					err instanceof BackendUnavailableError
-						? 'cross-lingual is not reachable — check that the HTTP server (just run-http) is running.'
-						: `Unexpected error: ${err instanceof Error ? err.message : String(err)}`;
-			} finally {
-				turn.running = false;
-				touchSession(session.id);
 			}
+			touchSession(session.id);
 		}
 
 		busy = false;
@@ -251,101 +263,42 @@
 		}
 	}
 
-	// Approve/reject right here, on the review-queue row this exact chat
-	// turn just created -- previously the only way to act on it was to
-	// leave for /review, find the same row again, and decide there.
-	// Deliberately approve/reject only, no correction editing here (still a
-	// /review-only action) -- but publishing IS available from here too,
-	// see `publish()` below, so the whole human-in-the-loop (approve or
-	// reject, then optionally publish live) can finish without ever
-	// leaving the chat.
-	async function decide(turn: PipelineTurn, decision: 'approved' | 'rejected') {
-		if (!turn.reviewItemId || turn.deciding) return;
-		const id = turn.reviewItemId;
-		turn.deciding = true;
-		turn.decisionError = undefined;
-
-		// Fields the reviewer assigned by hand in the chat ride along on the
-		// approve as `corrected_mappings` -- the decision endpoint already
-		// replaces the item's mappings with these before logging the
-		// decision as training data, so no separate write is needed.
-		const manual = turn.manualMappings ?? [];
-		const request =
-			decision === 'approved' && manual.length > 0
-				? decideReview(id, decision, {
-						correctedMappings: [...(turn.mappings ?? []), ...manual]
-					})
-				: decideReview(id, decision);
-		toast.promise(request, {
-			loading: decision === 'approved' ? 'Approving…' : 'Rejecting…',
-			success: (updated) => {
-				turn.reviewStatus = updated.status;
-				return `Marked as ${updated.status.replace('_', ' ')}.`;
-			},
-			error: (err) => {
-				turn.decisionError =
-					err instanceof DecisionFailedError
-						? err.message
-						: 'Could not record that decision — backend not reachable.';
-				return turn.decisionError;
-			}
-		});
-
-		try {
-			await request;
-		} catch {
-			// already surfaced via the toast.promise error callback above
-		} finally {
-			turn.deciding = false;
-		}
-	}
-
-	// Which turn's publish-confirmation dialog is open, if any -- at most
-	// one at a time, matching /review's own `confirmPublishFor` pattern.
-	// Publishing is a real, outward-facing, hard-to-reverse write to the
-	// live MediaWiki (mcp_server.publish.publish_mapping), so it always
-	// goes through this confirmation step, in chat or on /review alike --
-	// never a bare one-click action.
+	// Publishing writes to the live mappings wiki -- a real, hard-to-reverse
+	// edit -- so it always goes through this confirmation dialog first.
 	let confirmPublishTurnId = $state<string | null>(null);
 
+	const canPublish = (turn: PipelineTurn) =>
+		Boolean(turn.templateName) && rowsFor(turn).length > 0 && !turn.published;
+
 	function requestPublish(turn: PipelineTurn) {
-		if (!turn.reviewItemId || turn.reviewStatus !== 'approved') return;
-		confirmPublishTurnId = turn.id;
+		if (canPublish(turn)) confirmPublishTurnId = turn.id;
 	}
 
 	async function publish(turn: PipelineTurn) {
-		if (!turn.reviewItemId || turn.publishing) return;
-		const id = turn.reviewItemId;
+		if (!turn.templateName || turn.publishing) return;
 		turn.publishing = true;
 		turn.publishError = undefined;
-
-		// decision: 'approved' again is deliberate, not a re-approval --
-		// mcp_server.http_app.decide_review always applies the decision
-		// (idempotent when already approved) and only then, given
-		// `publish: true`, attempts the live write. A failed publish
-		// leaves the review at "approved" (never a silent partial state),
-		// so the button just becomes retryable.
-		const request = decideReview(id, 'approved', { publish: true });
+		const request = publishMapping({
+			templateName: turn.templateName,
+			domainClass: turn.domainClass ?? turn.targetClass ?? 'Thing',
+			mappings: rowsFor(turn),
+			originalMappings: turn.mappings ?? [],
+			reviewItemId: turn.reviewItemId
+		});
 		toast.promise(request, {
-			loading: `Publishing ${turn.mappingWikitext ? 'mapping' : 'to the live wiki'}…`,
-			success: (updated) => {
-				turn.reviewStatus = updated.status;
-				return updated.status === 'published'
-					? 'Published to the live wiki.'
-					: `Marked as ${updated.status.replace('_', ' ')}.`;
+			loading: 'Publishing to mappings.dbpedia.org…',
+			success: (result) => {
+				turn.published = { title: result.title, url: result.url };
+				return `Published ${result.title}.`;
 			},
 			error: (err) => {
 				turn.publishError =
-					err instanceof DecisionFailedError
+					err instanceof PublishFailedError
 						? err.message
 						: 'Could not reach the backend to publish.';
-				if (err instanceof DecisionFailedError && err.review) {
-					turn.reviewStatus = err.review.status;
-				}
 				return `Publish failed: ${turn.publishError}`;
 			}
 		});
-
 		try {
 			await request;
 		} catch {
@@ -353,6 +306,8 @@
 		} finally {
 			turn.publishing = false;
 			confirmPublishTurnId = null;
+			const session = currentSession();
+			if (session) touchSession(session.id);
 		}
 	}
 
@@ -377,11 +332,8 @@
 				<div>
 					<h1 class="text-2xl font-semibold tracking-tight">Amharic → DBpedia Mapping Assistant</h1>
 					<p class="mt-2 text-sm text-muted-foreground">
-						Paste an infobox, a Wikipedia article link, or ask about a single field. Nothing is
-						published until a reviewer approves it on the
-						<a href={resolve('/review')} class="text-primary underline underline-offset-4"
-							>Review Queue</a
-						>.
+						Paste an infobox, a Wikipedia article link, or ask about a field in Amharic or English.
+						Edit the result right here; nothing is published until you press Publish.
 					</p>
 				</div>
 				<div class="flex flex-wrap justify-center gap-2">
@@ -421,44 +373,24 @@
 								/>
 							{/if}
 							<StepTracker steps={turn.steps} />
-							{#if turn.mappings && turn.mappings.length > 0}
-								{@const rows = rowsFor(turn)}
-								<div class="overflow-hidden rounded-lg border">
-									<Table>
-										<TableHeader>
-											<TableRow class="hover:bg-transparent">
-												<TableHead>Template property</TableHead>
-												<TableHead>Ontology property</TableHead>
-												<TableHead>Confidence</TableHead>
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{#each rows as mapping (mapping.templateProperty)}
-												<TableRow>
-													<TableCell class="font-mono">{mapping.templateProperty}</TableCell>
-													<TableCell class="font-mono">
-														{mapping.ontologyProperty}
-														{#if mapping.source === 'llm'}
-															<span
-																class="ml-1.5 rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium text-warning-foreground"
-																title="Proposed by the language model because retrieval found nothing -- verify before approving."
-															>
-																AI-proposed
-															</span>
-														{:else if mapping.source === 'manual'}
-															<span
-																class="ml-1.5 rounded bg-accent px-1 py-0.5 text-[10px] font-medium text-accent-foreground"
-															>
-																added by you
-															</span>
-														{/if}
-													</TableCell>
-													<TableCell><ConfidencePill confidence={mapping.confidence} /></TableCell>
-												</TableRow>
-											{/each}
-										</TableBody>
-									</Table>
+							{#if turn.feedback}
+								<div
+									class="rounded-2xl rounded-tl-sm bg-muted/60 px-4 py-2.5 text-sm leading-relaxed"
+								>
+									{#each feedbackParts(turn.feedback.message) as part, i (i)}
+										{#if part.code}<code class="font-mono text-[0.85em]">{part.text}</code
+											>{:else}{part.text}{/if}
+									{/each}
 								</div>
+							{/if}
+							{#if turn.mappings && turn.edited && (turn.mappings.length > 0 || turn.edited.length > 0)}
+								{@const rows = turn.edited}
+								<MappingEditor
+									bind:mappings={turn.edited}
+									original={turn.mappings}
+									domainClass={turn.domainClass ?? turn.targetClass ?? 'Thing'}
+									readonly={Boolean(turn.published)}
+								/>
 								{#if turn.mappingWikitext}
 									<details class="rounded-lg border">
 										<summary
@@ -481,75 +413,44 @@
 											class="overflow-x-auto border-t bg-muted/40 px-3 py-2.5 font-mono text-xs whitespace-pre-wrap">{turn.xmlRules}</pre>
 									</details>
 								{/if}
-								{#if turn.reviewStatus === 'approved'}
+								{#if turn.published}
+									<p class="flex flex-wrap items-center gap-1.5 text-sm text-success">
+										<Fa icon={faCircleCheck} class="size-3.5" />
+										Published
+										<!-- eslint-disable svelte/no-navigation-without-resolve -- external wiki page, not an app route -->
+										<a
+											href={turn.published.url}
+											target="_blank"
+											rel="noreferrer"
+											class="font-mono underline underline-offset-4">{turn.published.title}</a
+										>
+										<!-- eslint-enable svelte/no-navigation-without-resolve -->
+									</p>
+								{:else}
 									<div class="flex flex-wrap items-center gap-2">
-										<StatusBadge status={turn.reviewStatus} />
 										<Button
 											size="sm"
-											disabled={turn.publishing}
+											disabled={turn.publishing || !canPublish(turn)}
 											onclick={() => requestPublish(turn)}
 										>
 											<Fa
 												icon={turn.publishing ? faSpinner : faCloudUploadAlt}
 												class="size-3.5 {turn.publishing ? 'animate-spin' : ''}"
 											/>
-											Publish to live wiki
+											Publish {rows.length} mapping{rows.length === 1 ? '' : 's'}
 										</Button>
-										<a
-											href={resolve('/review')}
-											class="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-										>
-											View in Review Queue
-										</a>
+										{#if !turn.templateName}
+											<span class="text-xs text-muted-foreground"
+												>No template name found, so there is no page to publish to.</span
+											>
+										{:else}
+											<span class="text-xs text-muted-foreground"
+												>to <span class="font-mono">Mapping am:{turn.templateName}</span></span
+											>
+										{/if}
 									</div>
 									{#if turn.publishError}
 										<p class="text-sm text-destructive">{turn.publishError}</p>
-									{/if}
-								{:else if turn.reviewStatus}
-									<div class="flex w-fit items-center gap-2">
-										<StatusBadge status={turn.reviewStatus} />
-										<a
-											href={resolve('/review')}
-											class="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-										>
-											View in Review Queue
-										</a>
-									</div>
-								{:else if turn.reviewItemId}
-									<div class="flex flex-wrap items-center gap-2">
-										<Button
-											size="sm"
-											variant="outline"
-											class="border-success/40 text-success hover:bg-success/10 hover:text-success"
-											disabled={turn.deciding}
-											onclick={() => decide(turn, 'approved')}
-										>
-											<Fa
-												icon={turn.deciding ? faSpinner : faCircleCheck}
-												class="size-3.5 {turn.deciding ? 'animate-spin' : ''}"
-											/>
-											Approve
-										</Button>
-										<Button
-											size="sm"
-											variant="outline"
-											class="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-											disabled={turn.deciding}
-											onclick={() => decide(turn, 'rejected')}
-										>
-											<Fa icon={faCircleXmark} class="size-3.5" />
-											Reject
-										</Button>
-										<a
-											href={resolve('/review')}
-											class="flex items-center gap-1.5 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-										>
-											or correct it on the Review Queue
-											<Fa icon={faArrowRight} class="size-2.5 shrink-0" />
-										</a>
-									</div>
-									{#if turn.decisionError}
-										<p class="text-sm text-destructive">{turn.decisionError}</p>
 									{/if}
 								{/if}
 							{:else if turn.mappings}
@@ -570,9 +471,9 @@
 								<div class="rounded-lg border border-dashed p-3">
 									<p class="mb-2.5 text-xs text-muted-foreground">
 										{turn.unmappedFields.length} field{turn.unmappedFields.length === 1 ? '' : 's'} couldn't
-										be mapped automatically. Search the ontology and assign
-										{turn.unmappedFields.length === 1 ? 'it' : 'them'} here, or leave
-										{turn.unmappedFields.length === 1 ? 'it' : 'them'} for the Review Queue.
+										be mapped automatically. Pick a suggestion or search the ontology to add
+										{turn.unmappedFields.length === 1 ? 'it' : 'them'} to the table, or leave
+										{turn.unmappedFields.length === 1 ? 'it' : 'them'} out of the publish.
 									</p>
 									<div class="flex flex-col gap-2.5">
 										{#each turn.unmappedFields as field (field.name)}
@@ -586,6 +487,29 @@
 														>
 													{/if}
 												</div>
+												{#if field.suggestions?.length}
+													<div class="mt-2 flex flex-wrap items-center gap-1.5">
+														<span class="text-[11px] text-muted-foreground"
+															>Closest (unverified):</span
+														>
+														{#each field.suggestions as suggestion (suggestion.property)}
+															<button
+																type="button"
+																class="rounded-full border border-dashed px-2.5 py-0.5 font-mono text-xs hover:border-primary/50 hover:bg-accent"
+																title="Assign this property to the field"
+																onclick={() =>
+																	attachManualMapping(
+																		turn,
+																		field.name,
+																		suggestion.property,
+																		suggestion.score
+																	)}
+															>
+																{suggestion.property}
+															</button>
+														{/each}
+													</div>
+												{/if}
 												{#if entry}
 													<div class="mt-2 flex gap-2">
 														<Input
@@ -643,16 +567,72 @@
 								</div>
 							{/if}
 						{:else if turn.kind === 'answer'}
+							{#if turn.field}
+								<p class="text-xs text-muted-foreground">
+									Looking up the field <span class="font-mono">{turn.field}</span>
+								</p>
+							{/if}
+							{#if turn.reply}
+								<div class="rounded-2xl rounded-tl-sm bg-muted/60 px-4 py-2.5 text-sm">
+									{turn.reply}
+								</div>
+							{/if}
+							{#if turn.feedback}
+								<div
+									class="rounded-2xl rounded-tl-sm bg-muted/60 px-4 py-2.5 text-sm leading-relaxed"
+								>
+									{#each feedbackParts(turn.feedback.message) as part, i (i)}
+										{#if part.code}<code class="font-mono text-[0.85em]">{part.text}</code
+											>{:else}{part.text}{/if}
+									{/each}
+								</div>
+							{/if}
 							{#if turn.running}
 								<ThinkingIndicator label="Searching the ontology" />
 							{:else if turn.noMatch}
 								<p class="text-sm">No confident match found in the ontology for that term.</p>
+								{#if turn.llmUnavailable}
+									<p class="mt-1 text-xs text-muted-foreground">
+										The language model could not be reached, so it wasn't asked. Start Ollama or
+										check GROQ_API_KEY.
+									</p>
+								{/if}
+								{#if turn.suggestions?.length}
+									<p class="mt-2 text-xs text-muted-foreground">
+										Closest by similarity (unverified — check before using):
+									</p>
+									<ul class="mt-1.5 flex flex-wrap gap-1.5">
+										{#each turn.suggestions as match (match.property)}
+											<li
+												class="flex items-center gap-1.5 rounded-full border border-dashed px-2.5 py-1 text-sm text-muted-foreground"
+											>
+												<span class="font-mono">{match.property}</span>
+											</li>
+										{/each}
+									</ul>
+								{/if}
 							{:else if turn.matches}
 								<ul class="flex flex-wrap gap-1.5">
 									{#each turn.matches as match (match.property)}
 										<li class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-sm">
 											<span class="font-mono">{match.property}</span>
-											<ConfidencePill confidence={match.score} />
+											{#if match.payload?.source === 'llm'}
+												<span
+													class="rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium text-warning-foreground"
+													title="Chosen by the language model because retrieval found nothing confident -- verify before using."
+												>
+													AI-proposed
+												</span>
+											{:else if match.payload?.source === 'learned'}
+												<span
+													class="rounded bg-accent px-1 py-0.5 text-[10px] font-medium text-accent-foreground"
+													title="A reviewer approved this field for this class before."
+												>
+													learned
+												</span>
+											{:else}
+												<ConfidencePill confidence={match.score} />
+											{/if}
 										</li>
 									{/each}
 								</ul>
@@ -668,6 +648,15 @@
 						{/if}
 					</div>
 				{/each}
+			</div>
+		{/if}
+		{#if understanding}
+			<div class="mt-6 flex flex-col gap-3">
+				<div class="flex justify-end">
+					<pre
+						class="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground">{understanding}</pre>
+				</div>
+				<ThinkingIndicator label="Reading your message" />
 			</div>
 		{/if}
 		<div bind:this={scrollAnchor}></div>
@@ -686,7 +675,7 @@
 				<Textarea
 					bind:value={input}
 					onkeydown={onKeydown}
-					placeholder="Paste an infobox, a Wikipedia link, or ask about a field…"
+					placeholder="Paste an infobox, a Wikipedia link, or ask about a field (Amharic or English)…"
 					rows={1}
 					class="max-h-48 min-h-9 resize-none border-none bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
 				/>
@@ -714,13 +703,14 @@
 		>
 			<AlertDialog.Content>
 				<AlertDialog.Header>
-					<AlertDialog.Title>Publish this mapping live?</AlertDialog.Title>
+					<AlertDialog.Title>Publish to mappings.dbpedia.org?</AlertDialog.Title>
 					<AlertDialog.Description>
 						This writes
 						<span class="font-mono text-foreground">{rowsFor(turn).length}</span>
 						mapping{rowsFor(turn).length === 1 ? '' : 's'} to
-						<span class="font-mono text-foreground">mappings.dbpedia.org</span> immediately, using a MediaWiki
-						Bot Password — a real edit, not a preview.
+						<span class="font-mono text-foreground">Mapping am:{turn.templateName}</span>
+						on the live wiki immediately, using the configured bot account. Mappings already on that page
+						are kept; a field already mapped there is updated. It is a real edit, not a preview.
 					</AlertDialog.Description>
 				</AlertDialog.Header>
 				{#if rowsFor(turn).length > 0}

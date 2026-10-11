@@ -10,7 +10,7 @@
 		extract_infobox_fields: 'Extract infobox fields',
 		predict_properties: 'Predict ontology properties',
 		format_mapping_syntax: 'Generate mapping XML',
-		persist_review_item: 'Save to review queue'
+		persist_review_item: 'Save run record'
 	};
 </script>
 

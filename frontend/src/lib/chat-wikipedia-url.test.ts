@@ -11,6 +11,16 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 	beforeEach(() => {
 		sessions.length = 0;
 		active.id = null;
+		// Groq routing/feedback are server calls; keep them local here.
+		vi.spyOn(api, 'understandInput').mockImplementation(async (text, cls) => ({
+			intent: api.looksLikeWikipediaUrl(text) ? 'url' : 'field',
+			text,
+			target_class: cls ?? null,
+			language: 'en',
+			reply: null,
+			source: 'rules'
+		}));
+		vi.spyOn(api, 'summarizeResult').mockResolvedValue(null);
 	});
 
 	afterEach(() => {
@@ -73,7 +83,7 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 		// "fetch_source_article" node string instead.
 		await waitFor(() => {
 			expect(screen.getByText('Fetch Wikipedia article')).toBeInTheDocument();
-			expect(screen.getByText('river')).toBeInTheDocument();
+			expect(screen.getByDisplayValue('river')).toBeInTheDocument();
 		});
 	});
 

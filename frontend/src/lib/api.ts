@@ -11,31 +11,23 @@ import type {
 	MappingCandidate,
 	MappingSyntax,
 	PredictedMapping,
-	ReviewItem,
-	ReviewStatus,
 	UnmappedField
 } from './types';
 
 export class BackendUnavailableError extends Error {}
 
 /**
- * The backend understood the request but the decision itself failed
- * server-side — most importantly a publish failure (missing MediaWiki
- * credentials, a rejected edit, ...): `mcp_server/http_app.py::decide_review`
- * returns 502 with `{error_type, message, review}`, where `review` is the
- * item's real resulting state (still "approved", never silently
- * "published"). Callers should apply `review` to their local state rather
- * than treating this like `BackendUnavailableError` — the decision itself
- * (approve/reject) went through even when a requested publish didn't.
+ * The backend understood the publish request but the write itself failed
+ * (missing MediaWiki bot credentials, a rejected edit, ...):
+ * `POST /v1/publish` answers 502 with `{error_type, message}`. Distinct from
+ * `BackendUnavailableError` so the chat can show the real reason.
  */
-export class DecisionFailedError extends Error {
+export class PublishFailedError extends Error {
 	errorType: string;
-	review?: ReviewItem;
 
-	constructor(message: string, errorType: string, review?: ReviewItem) {
+	constructor(message: string, errorType: string) {
 		super(message);
 		this.errorType = errorType;
-		this.review = review;
 	}
 }
 
@@ -52,7 +44,12 @@ type PreviewEvent =
 	| ({
 			node: 'result';
 			mappings: PredictedMapping[];
+			// Run record id -- sent back on publish so coverage stays right.
 			reviewItemId: string | null;
+			// The page a publish writes (`Mapping am:<templateName>`) and the
+			// class it maps to (may have been derived from the template).
+			templateName?: string | null;
+			domainClass?: string;
 			// Pipeline notes: fields skipped as already-published, fields
 			// with no confident match, an auto-derived domain class. Absent
 			// on older backends -- treat undefined as [].
@@ -92,7 +89,7 @@ export function looksLikeWikipediaUrl(text: string): boolean {
  * Was originally pointed at agentic-dbpedia (`AGENTIC_DBPEDIA_URL`) — that
  * predates this session settling on cross-lingual owning the full
  * pipeline (agentic-dbpedia is DEF-extraction-only); repointed here for
- * the same reason 14.1 already repointed `listReviewQueue`/`decideReview`.
+ * the same reason every other endpoint here lives there.
  */
 export async function* previewMapping(
 	source: string,
@@ -139,6 +136,10 @@ export async function findSemanticMatch(
 	status: 'ok' | 'no_match' | 'rejected';
 	matches: MappingCandidate[];
 	message?: string;
+	/** Unverified similarity matches, sent with `no_match`. */
+	suggestions?: MappingCandidate[];
+	/** Set when the language model could not be reached to try. */
+	llm_error?: string | null;
 }> {
 	const res = await safeFetch(`${CROSS_LINGUAL_URL}/v1/find-semantic-match`, {
 		method: 'POST',
@@ -149,61 +150,102 @@ export async function findSemanticMatch(
 	return res.json();
 }
 
-/**
- * EXISTING: GET {CROSS_LINGUAL_URL}/v1/reviews[?status=] — the
- * Postgres-backed queue (mcp_server/http_app.py, refs implementation.md
- * 14.1; the `status` filter was always supported server-side via
- * `list_reviews`'s own `request.query_params.get("status")` but never
- * exposed here until AppSidebar needed a pending-review count without
- * pulling the entire queue just to filter it client-side). Run it with
- * `uvicorn mcp_server.http_app:create_app --factory` alongside the MCP
- * stdio server.
- */
-export async function listReviewQueue(status?: ReviewStatus): Promise<ReviewItem[]> {
-	const url = status
-		? `${CROSS_LINGUAL_URL}/v1/reviews?status=${encodeURIComponent(status)}`
-		: `${CROSS_LINGUAL_URL}/v1/reviews`;
-	const res = await safeFetch(url);
-	if (!res.ok) throw new BackendUnavailableError(`reviews failed: ${res.status}`);
-	return res.json();
+/** What Groq made of the user's message (`mcp_server/assistant.py`). */
+export interface InputPlan {
+	intent: 'infobox' | 'url' | 'field' | 'unsupported' | 'rejected';
+	/** What to run: the raw infobox, the URL, or the extracted field name. */
+	text: string;
+	target_class: string | null;
+	language: 'am' | 'en';
+	reply: string | null;
+	source: 'groq' | 'rules';
 }
 
 /**
- * EXISTING: POST {CROSS_LINGUAL_URL}/v1/reviews/{id}/decision
- * (mcp_server/http_app.py, refs implementation.md 14.2/14.3).
- *
- * `correctedMappings`, when given, replaces the review item's predicted
- * mappings with a reviewer-edited version before logging the decision as
- * training data. `publish: true` (only meaningful alongside
- * `decision: "approved"`) is this call's explicit consent to actually
- * write the mapping to the live MediaWiki — a real, outward-facing,
- * hard-to-reverse action — and flips status to "published" on success
- * instead of "approved"; leave it `false`/omitted to just record the
- * review decision without publishing anything live. A failed publish
- * rejects with `DecisionFailedError`, not `BackendUnavailableError` — see
- * that class's doc comment.
+ * POST /v1/assist/understand -- Groq turns free text into a plan (intent,
+ * field, DBpedia class). Falls back to local rules if the call itself
+ * fails, so a Groq outage never blocks mapping.
  */
-export async function decideReview(
-	id: string,
-	decision: 'approved' | 'rejected',
-	options?: { reason?: string; correctedMappings?: PredictedMapping[]; publish?: boolean }
-): Promise<ReviewItem> {
-	const res = await safeFetch(`${CROSS_LINGUAL_URL}/v1/reviews/${id}/decision`, {
+export async function understandInput(text: string, targetClass?: string): Promise<InputPlan> {
+	const local = (): InputPlan => ({
+		intent: looksLikeWikipediaUrl(text) ? 'url' : text.includes('{{') ? 'infobox' : 'field',
+		text: text.trim(),
+		target_class: targetClass ?? null,
+		language: 'en',
+		reply: null,
+		source: 'rules'
+	});
+	try {
+		const res = await fetch(`${CROSS_LINGUAL_URL}/v1/assist/understand`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ text, target_class: targetClass })
+		});
+		return res.ok ? await res.json() : local();
+	} catch {
+		return local();
+	}
+}
+
+/**
+ * POST /v1/assist/summarize -- Groq writes the final reply for a result.
+ * The server discards any reply naming a property not in the result.
+ * Resolves to `null` (show no prose, the table still stands) on failure.
+ */
+export async function summarizeResult(
+	kind: 'infobox' | 'field',
+	result: Record<string, unknown>,
+	language: 'am' | 'en' = 'en'
+): Promise<{ message: string; source: 'groq' | 'rules' } | null> {
+	try {
+		const res = await fetch(`${CROSS_LINGUAL_URL}/v1/assist/summarize`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ kind, result, language })
+		});
+		return res.ok ? await res.json() : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * POST /v1/publish -- write the (possibly edited) mapping to
+ * `Mapping am:<templateName>` on the live wiki. `consent: true` is sent
+ * only after the chat's confirmation dialog. A failed write rejects with
+ * `PublishFailedError` carrying the server's reason.
+ */
+export async function publishMapping(request: {
+	templateName: string;
+	domainClass: string;
+	mappings: PredictedMapping[];
+	originalMappings?: PredictedMapping[];
+	reviewItemId?: string | null;
+}): Promise<{ status: 'published'; title: string; url: string }> {
+	const res = await safeFetch(`${CROSS_LINGUAL_URL}/v1/publish`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({
-			decision,
-			reason: options?.reason,
-			corrected_mappings: options?.correctedMappings,
-			publish: options?.publish
+			template_name: request.templateName,
+			domain_class: request.domainClass,
+			mappings: request.mappings.map((m) => ({
+				templateProperty: m.templateProperty,
+				ontologyProperty: m.ontologyProperty
+			})),
+			original_mappings: request.originalMappings?.map((m) => ({
+				templateProperty: m.templateProperty,
+				ontologyProperty: m.ontologyProperty
+			})),
+			review_item_id: request.reviewItemId ?? undefined,
+			consent: true
 		})
 	});
 	if (!res.ok) {
 		const body = await res.json().catch(() => null);
 		if (body && typeof body.message === 'string') {
-			throw new DecisionFailedError(body.message, body.error_type ?? 'unknown', body.review);
+			throw new PublishFailedError(body.message, body.error_type ?? 'unknown');
 		}
-		throw new BackendUnavailableError(`decision failed: ${res.status}`);
+		throw new BackendUnavailableError(`publish failed: ${res.status}`);
 	}
 	return res.json();
 }

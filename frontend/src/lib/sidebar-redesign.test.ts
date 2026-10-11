@@ -10,7 +10,6 @@ import {
 	touchSession,
 	type PipelineTurn
 } from './chat.svelte';
-import * as api from './api';
 
 function makeTurn(input: string): PipelineTurn {
 	return {
@@ -28,10 +27,6 @@ describe('sidebar redesign', () => {
 		sessions.length = 0;
 		active.id = null;
 		localStorage.clear();
-		// AppSidebar polls the pending-review count on mount -- give it a
-		// real-shaped, non-network response so it doesn't matter which
-		// order these tests' assertions race the actual fetch in.
-		vi.spyOn(api, 'listReviewQueue').mockResolvedValue([]);
 	});
 
 	afterEach(() => {
@@ -99,17 +94,17 @@ describe('sidebar redesign', () => {
 		render(AppSidebar, { props: { open: true } });
 
 		expect(screen.getByText('New chat')).toBeInTheDocument();
-		expect(screen.getByText('Review Queue')).toBeInTheDocument();
+		expect(screen.getByText('Coverage')).toBeInTheDocument();
 
 		const collapseButton = screen.getByRole('button', { name: 'Collapse sidebar' });
 		collapseButton.click();
 		await tick();
 
 		expect(screen.queryByText('New chat')).toBeNull();
-		expect(screen.queryByText('Review Queue')).toBeNull();
+		expect(screen.queryByText('Coverage')).toBeNull();
 		// The link itself -- and its accessible name via `title` -- must
 		// still be there; collapsing removes the label text, not the nav.
-		expect(screen.getByTitle('Review Queue')).toBeInTheDocument();
+		expect(screen.getByTitle('Coverage')).toBeInTheDocument();
 
 		screen.getByRole('button', { name: 'Expand sidebar' }).click();
 		await tick();

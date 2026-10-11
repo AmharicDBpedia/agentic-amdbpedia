@@ -124,6 +124,26 @@
 	}
 </script>
 
+{#snippet sourceBadge(row: PredictedMapping)}
+	{#if row.source === 'llm'}
+		<span
+			class="mt-1 inline-block rounded bg-warning/15 px-1 py-0.5 text-[10px] font-medium text-warning-foreground"
+			title="Chosen by the language model because retrieval found nothing confident -- check it before publishing."
+			>AI-proposed</span
+		>
+	{:else if row.source === 'learned'}
+		<span
+			class="mt-1 inline-block rounded bg-accent px-1 py-0.5 text-[10px] font-medium text-accent-foreground"
+			title="Published for this field and class before.">learned</span
+		>
+	{:else if row.source === 'manual'}
+		<span
+			class="mt-1 inline-block rounded bg-accent px-1 py-0.5 text-[10px] font-medium text-accent-foreground"
+			>added by you</span
+		>
+	{/if}
+{/snippet}
+
 <div class="overflow-hidden rounded-lg border">
 	<Table>
 		<TableHeader>
@@ -149,6 +169,7 @@
 					<TableCell class="whitespace-normal">
 						{#if readonly}
 							<span class="font-mono">{row.ontologyProperty}</span>
+							{@render sourceBadge(row)}
 						{:else}
 							<div class="flex items-center gap-1.5">
 								<Input
@@ -169,6 +190,7 @@
 									<Fa icon={faMagnifyingGlass} class="size-3.5" />
 								</Button>
 							</div>
+							{#if !isEdited(row)}{@render sourceBadge(row)}{/if}
 							{#if isEdited(row)}
 								<p class="mt-1 flex items-center gap-1 text-xs text-warning">
 									edited from

@@ -11,7 +11,6 @@ import { cleanup, render, screen } from '@testing-library/svelte';
 import AppSidebar from './components/AppSidebar.svelte';
 import ChatPage from '../routes/+page.svelte';
 import { sessions, active } from './chat.svelte';
-import * as api from './api';
 
 const SCRIPT_PATH = path.resolve(process.cwd(), 'scripts/seed-demo-chat-history.browser.js');
 
@@ -29,7 +28,6 @@ describe('demo chat history seed script', () => {
 		sessions.length = 0;
 		active.id = null;
 		localStorage.clear();
-		vi.spyOn(api, 'listReviewQueue').mockResolvedValue([]);
 	});
 
 	afterEach(() => {
@@ -114,9 +112,8 @@ describe('demo chat history seed script', () => {
 		render(ChatPage);
 
 		// Spot-check a representative turn from each kind/outcome this
-		// script seeds: a resolved pipeline result (StatusBadge, not live
-		// Approve/Reject buttons -- see the script's own comment on why),
-		// a confident single-field match, and an honest no-match refusal.
+		// script seeds: a resolved pipeline result, a confident single-field
+		// match, and an honest no-match refusal.
 		if (reloaded[0].turns[0].kind === 'answer') {
 			// "GERD dam, from its Wikipedia link" or "Quick field lookups"
 			// might be newest depending on the clock at test time; either

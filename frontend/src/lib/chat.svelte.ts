@@ -1,18 +1,17 @@
 // Chat history, persisted client-side. There's no backend "conversations"
-// table to back this with (review_items is a different concept -- a
-// mapping submitted for approval, not a chat turn), so this is deliberately
+// table to back this with, so this is deliberately
 // localStorage-only: per-browser, not shared across devices or reviewers.
 // Good enough for "the thread I was just looking at is still there after I
 // navigate away and back" without inventing backend storage this app
 // doesn't otherwise need.
 import { browser } from '$app/environment';
-import type {
-	AgentStep,
-	MappingCandidate,
-	PredictedMapping,
-	ReviewStatus,
-	UnmappedField
-} from './types';
+import type { AgentStep, MappingCandidate, PredictedMapping, UnmappedField } from './types';
+
+/** Groq's final reply for a turn (`POST /v1/assist/summarize`). */
+export interface TurnFeedback {
+	message: string;
+	source: 'groq' | 'rules';
+}
 
 export interface PipelineTurn {
 	id: string;
@@ -20,38 +19,30 @@ export interface PipelineTurn {
 	input: string;
 	targetClass?: string;
 	steps: AgentStep[];
+	// `null` is "the run hasn't finished yet"; `[]` is "finished, nothing
+	// confident enough to map".
 	mappings: PredictedMapping[] | null;
 	mappingWikitext?: string;
 	xmlRules?: string;
-	// `null` mappings/reviewItemId is "the run hasn't finished yet"; a
-	// present-but-empty `mappings` array with `reviewItemId: null` is "it
-	// finished, but nothing was confident enough to write" (see
-	// mcp_server/pipeline.py's persist_review_item -- it only creates a
-	// row when mappings is non-empty). Approve/reject only ever apply to
-	// the latter: a real row this run actually created.
+	// The run record the pipeline saved; sent back on publish.
 	reviewItemId?: string | null;
-	reviewStatus?: ReviewStatus;
-	// Pipeline notes shown under the result: fields skipped as
-	// already-published, fields with no confident match, an auto-derived
-	// domain class. Without these a mostly-already-mapped infobox looks
-	// broken ("only 2 mapped?") rather than correct.
+	// What a publish writes: `Mapping am:<templateName>` mapped to `domainClass`.
+	templateName?: string | null;
+	domainClass?: string;
+	// The editable copy shown in the chat table (starts as `mappings`).
+	// Publishing sends exactly these rows.
+	edited?: PredictedMapping[];
+	// Pipeline notes: fields skipped as already-published, fields with no
+	// confident match, which model answered, an auto-derived class.
 	warnings?: string[];
-	// Fields the pipeline couldn't map at all. The reviewer can search the
-	// ontology and attach a mapping to any of these from the chat (see
-	// `manualMappings`), or leave them for the Review Queue.
+	// Fields the pipeline couldn't map; each can be assigned from the chat.
 	unmappedFields?: UnmappedField[];
-	// Mappings the reviewer assigned by hand from the chat, for fields in
-	// `unmappedFields`. Merged with `mappings` on approve via the decision
-	// endpoint's existing `corrected_mappings` path -- not a separate write.
+	// Older saved chats kept hand-assigned rows here; folded into `edited`.
 	manualMappings?: PredictedMapping[];
-	deciding?: boolean;
-	decisionError?: string;
-	// Publishing is a separate, later step from approving -- a turn can sit
-	// at reviewStatus "approved" for a while before (or without) also being
-	// published live. Kept distinct from `deciding`/`decisionError` so a
-	// publish failure never gets confused with an approve/reject failure.
+	feedback?: TurnFeedback | null;
 	publishing?: boolean;
 	publishError?: string;
+	published?: { title: string; url: string };
 	running: boolean;
 	error?: string;
 }
@@ -61,8 +52,16 @@ export interface AnswerTurn {
 	kind: 'answer';
 	input: string;
 	targetClass?: string;
+	// The field Groq extracted from a free-form question, when it differs
+	// from the raw input.
+	field?: string;
 	matches: MappingCandidate[] | null;
 	noMatch: boolean;
+	suggestions?: MappingCandidate[];
+	llmUnavailable?: boolean;
+	// A reply with nothing to map (greeting, off-topic) or a rejection.
+	reply?: string;
+	feedback?: TurnFeedback | null;
 	running: boolean;
 	error?: string;
 }
@@ -79,13 +78,26 @@ export interface ChatSession {
 const STORAGE_KEY = 'amdbpedia:chat-sessions:v1';
 const MAX_SESSIONS = 50;
 
+// Chats saved before in-chat editing have no `edited` rows. Filling them in
+// here, not while rendering, because Svelte forbids writing state from a
+// template expression (state_unsafe_mutation).
+export function withEditedRows(loaded: ChatSession[]): ChatSession[] {
+	for (const session of loaded) {
+		for (const turn of session.turns ?? []) {
+			if (turn.kind !== 'pipeline' || turn.edited || !turn.mappings) continue;
+			turn.edited = [...turn.mappings, ...(turn.manualMappings ?? [])].map((row) => ({ ...row }));
+		}
+	}
+	return loaded;
+}
+
 function loadSessions(): ChatSession[] {
 	if (!browser) return [];
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return [];
 		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? parsed : [];
+		return Array.isArray(parsed) ? withEditedRows(parsed) : [];
 	} catch (err) {
 		console.error('Failed to load chat history from localStorage:', err);
 		return [];

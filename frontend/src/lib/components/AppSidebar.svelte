@@ -4,17 +4,14 @@
 	import { browser } from '$app/environment';
 	import { cn } from '$lib/utils.js';
 	import { sessions, active, startNewChat, selectSession, deleteSession } from '$lib/chat.svelte';
-	import { listReviewQueue } from '$lib/api';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
 	import { Separator } from '$lib/components/ui/separator/index.js';
-	import { Badge } from '$lib/components/ui/badge/index.js';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import logo from '$lib/assets/dbpedia-am-logo.png';
 	import Fa from 'svelte-fa';
 	import {
 		faPlus,
-		faListCheck,
 		faChartSimple,
 		faTrash,
 		faMagnifyingGlass,
@@ -54,10 +51,7 @@
 		}
 	});
 
-	const links = [
-		{ href: resolve('/review'), label: 'Review Queue', icon: faListCheck },
-		{ href: resolve('/coverage'), label: 'Coverage', icon: faChartSimple }
-	];
+	const links = [{ href: resolve('/coverage'), label: 'Coverage', icon: faChartSimple }];
 
 	const isChatRoute = $derived(page.url.pathname === resolve('/'));
 
@@ -127,27 +121,6 @@
 		if (confirmDeleteId) deleteSession(confirmDeleteId);
 		confirmDeleteId = null;
 	}
-
-	// A live count on the Review Queue link -- so a reviewer can see
-	// there's work waiting without navigating there first. Fails quiet
-	// (no badge, not a broken one) when the backend isn't reachable; the
-	// review page itself already owns the honest "not reachable" state.
-	let pendingReviewCount = $state<number | null>(null);
-
-	async function refreshPendingCount() {
-		try {
-			const items = await listReviewQueue('pending_review');
-			pendingReviewCount = items.length;
-		} catch {
-			pendingReviewCount = null;
-		}
-	}
-
-	$effect(() => {
-		refreshPendingCount();
-		const interval = setInterval(refreshPendingCount, 60_000);
-		return () => clearInterval(interval);
-	});
 </script>
 
 {#if open}
@@ -206,7 +179,6 @@
 	<nav class="space-y-1 px-2.5">
 		{#each links as link (link.href)}
 			{@const isActive = page.url.pathname === link.href}
-			{@const isReviewLink = link.href === resolve('/review')}
 			<a
 				href={link.href}
 				onclick={() => (open = false)}
@@ -222,16 +194,6 @@
 				<Fa icon={link.icon} class="size-3.5 shrink-0" />
 				{#if !collapsed}
 					<span class="flex-1">{link.label}</span>
-					{#if isReviewLink && pendingReviewCount}
-						<Badge variant="warning" class="h-5 min-w-5 justify-center px-1 tabular-nums">
-							{pendingReviewCount}
-						</Badge>
-					{/if}
-				{:else if isReviewLink && pendingReviewCount}
-					<span
-						class="absolute top-1 right-1 size-1.5 rounded-full bg-warning"
-						aria-label="{pendingReviewCount} pending review{pendingReviewCount === 1 ? '' : 's'}"
-					></span>
 				{/if}
 			</a>
 		{/each}
@@ -330,8 +292,8 @@
 					<span class="font-medium text-foreground">{confirmDeleteSession.title}</span> and its {confirmDeleteSession
 						.turns.length}
 					message{confirmDeleteSession.turns.length === 1 ? '' : 's'} will be removed from this browser.
-					This can't be undone. Anything already sent to the Review Queue is unaffected — deleting the
-					chat doesn't delete what it submitted.
+					This can't be undone. Anything already published is unaffected — deleting the chat doesn't delete
+					what it submitted.
 				{/if}
 			</AlertDialog.Description>
 		</AlertDialog.Header>

@@ -17,11 +17,12 @@ export interface PredictedMapping {
 	ontologyProperty: string;
 	confidence: number;
 	// How this row was arrived at: `retrieval` (the ontology search, the
-	// default), `llm` (proposed from scratch by the language model because
-	// retrieval found nothing — treat as a weak guess), or `manual` (a
-	// reviewer assigned it by hand from the chat). Absent on older
-	// backends — treat undefined as `retrieval`.
-	source?: 'retrieval' | 'llm' | 'manual';
+	// default), `llm` (chosen by the language model because retrieval
+	// found nothing confident — treat as a weak guess), `learned` (a
+	// reviewer approved this exact field for this class before), or
+	// `manual` (a reviewer assigned it by hand from the chat). Absent on
+	// older backends — treat undefined as `retrieval`.
+	source?: 'retrieval' | 'llm' | 'learned' | 'manual';
 }
 
 /** A field neither retrieval nor the LLM fallback could map, carried on
@@ -30,6 +31,9 @@ export interface PredictedMapping {
 export interface UnmappedField {
 	name: string;
 	value: string;
+	// Ungated similarity matches -- unverified, for a human to pick from.
+	// Absent on older backends.
+	suggestions?: MappingCandidate[];
 }
 
 /**
