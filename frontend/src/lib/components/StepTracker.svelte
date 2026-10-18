@@ -3,7 +3,8 @@
 	import Fa from 'svelte-fa';
 	import { faCircleCheck, faCircleXmark, faSpinner } from '@fortawesome/free-solid-svg-icons';
 
-	let { steps }: { steps: AgentStep[] } = $props();
+	// Once the run is over the steps fold into one line, unless one failed.
+	let { steps, finished = false }: { steps: AgentStep[]; finished?: boolean } = $props();
 
 	const stepLabels: Record<string, string> = {
 		fetch_source_article: 'የዊኪፔዲያ መለጠፊያን ማምጣት',
@@ -12,9 +13,11 @@
 		format_mapping_syntax: 'የማዛመጃ XML ማመንጨት',
 		persist_review_item: 'የሂደት መዝገብ ማስቀመጥ'
 	};
+
+	const failed = $derived(steps.some((step) => step.status === 'error'));
 </script>
 
-{#if steps.length > 0}
+{#snippet list()}
 	<ol class="space-y-2.5">
 		{#each steps as step, i (i)}
 			<li class="flex items-center gap-2.5 text-sm">
@@ -34,4 +37,21 @@
 			</li>
 		{/each}
 	</ol>
+{/snippet}
+
+{#if steps.length > 0}
+	{#if finished && !failed}
+		<details class="group text-sm">
+			<summary
+				class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+			>
+				<Fa icon={faCircleCheck} class="size-3 text-success" />
+				በ{steps.length} ደረጃዎች ተጠናቋል
+				<span class="group-open:hidden">· አሳይ</span>
+			</summary>
+			<div class="mt-2.5 pl-1">{@render list()}</div>
+		</details>
+	{:else}
+		{@render list()}
+	{/if}
 {/if}

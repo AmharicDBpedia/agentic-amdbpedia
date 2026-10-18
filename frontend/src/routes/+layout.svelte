@@ -31,11 +31,11 @@
 				size="icon"
 				class="size-8 md:hidden"
 				onclick={() => (sidebarOpen = !sidebarOpen)}
-				aria-label="Toggle sidebar"
+				aria-label="የጎን ማውጫውን ክፈት ወይም ዝጋ"
 			>
 				<Fa icon={faBars} class="size-4" />
 			</Button>
-			<img src={logo} alt="Amharic DBpedia" class="size-6 object-contain md:hidden" />
+			<img src={logo} alt="የአማርኛ DBpedia" class="size-6 object-contain md:hidden" />
 			<span class="text-sm font-semibold md:hidden">agentic-amdbpedia</span>
 			<div class="flex-1 md:hidden"></div>
 			<ModeToggle />

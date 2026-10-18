@@ -5,6 +5,6 @@
 	import { faSun, faMoon } from '@fortawesome/free-solid-svg-icons';
 </script>
 
-<Button onclick={toggleMode} variant="ghost" size="icon" class="size-8" aria-label="Toggle theme">
+<Button onclick={toggleMode} variant="ghost" size="icon" class="size-8" aria-label="ገጽታ ቀይር">
 	<Fa icon={mode.current === 'dark' ? faSun : faMoon} class="size-4" />
 </Button>
