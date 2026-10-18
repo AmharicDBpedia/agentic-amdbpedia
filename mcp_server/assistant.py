@@ -275,12 +275,9 @@ def unknown_properties(message: str, allowed: Iterable[str]) -> list[str]:
     ]
 
 
-def _plural(n: int, word: str) -> str:
-    return f"{n} {word}{'' if n == 1 else 's'}"
-
-
 def rules_summary(result: dict[str, Any], *, kind: str) -> str:
-    """Deterministic feedback; also the fallback whenever Groq can't be used."""
+    """Deterministic Amharic feedback; also the fallback whenever Groq can't
+    be used, so the user is always answered in Amharic."""
 
     if kind == "field":
         matches = result.get("matches", [])
@@ -288,44 +285,39 @@ def rules_summary(result: dict[str, Any], *, kind: str) -> str:
             top = matches[0]
             source = (top.get("payload") or {}).get("source")
             note = (
-                " The language model proposed it, so check it before using."
+                " ይህን በቋንቋ ሞዴል የተጠቆመ በመሆኑ ከመጠቀምዎ በፊት ያረጋግጡ።"
                 if source == "llm"
-                else " A reviewer published this mapping for the same class before."
+                else " ገምጋሚ ለዚሁ ክፍል ይህን ዝምድና ቀደም ሲል አትሞታል።"
                 if source == "learned"
                 else ""
             )
-            return f"`{top['property']}` is the best DBpedia property for this field.{note}"
+            return f"ለዚህ መስክ ተስማሚው DBpedia ባህርይ `{top['property']}` ነው።{note}"
         suggestions = [s["property"] for s in result.get("suggestions", [])][:3]
         tail = (
-            f" The closest by similarity are {', '.join(f'`{s}`' for s in suggestions)}, "
-            "but none is a confident match."
+            f" በተመሳሳይነት በጣም ቅርብ የሆኑት {'፣ '.join(f'`{s}`' for s in suggestions)} ናቸው፣ "
+            "ነገር ግን አንዳቸውም እርግጠኛ ዝምድና አይደሉም።"
             if suggestions
             else ""
         )
-        llm = " The language model could not be reached." if result.get("llm_error") else ""
-        return f"I couldn't find a confident DBpedia property for this field.{tail}{llm}"
+        llm = " የቋንቋ ሞዴሉ ሊገኝ አልቻለም።" if result.get("llm_error") else ""
+        return f"ለዚህ መስክ እርግጠኛ የሆነ DBpedia ባህርይ ማግኘት አልቻልኩም።{tail}{llm}"
 
     mappings, unmapped = _rows(result)
     if not mappings and not unmapped:
-        return "I couldn't find an infobox to map in that input."
+        return "በዚህ ማስገቢያ ውስጥ ማዛመድ የሚገባው የመረጃ ሳጥን ማግኘት አልቻልኩም።"
     proposed = [m for m in mappings if m.get("source") == "llm"]
-    parts = [f"I mapped {_plural(len(mappings), 'field')}"]
-    if result.get("domainClass"):
-        parts[0] += f" for the {result['domainClass']} class"
-    parts[0] += "."
+    class_part = f" ለ{result['domainClass']} ክፍል" if result.get("domainClass") else ""
+    parts = [f"በድምሩ {len(mappings)} መስኮች{class_part} ተዛምደዋል።"]
     if proposed:
-        names = ", ".join(f"{m['templateProperty']} → `{m['ontologyProperty']}`" for m in proposed)
-        parts.append(
-            f"{_plural(len(proposed), 'mapping')} came from the language model ({names}); "
-            "please check them."
-        )
+        names = "፣ ".join(f"{m['templateProperty']} → `{m['ontologyProperty']}`" for m in proposed)
+        parts.append(f"{len(proposed)} ዝምድናዎች ({names}) በAI ሞዴል የተጠቆሙ ናቸው፤ እባክዎ ያረጋግጡ።")
     if unmapped:
         parts.append(
-            f"{_plural(len(unmapped), 'field')} still need a property: "
-            + ", ".join(u["name"] for u in unmapped)
-            + ". Pick a suggestion or search for one below."
+            f"{len(unmapped)} መስኮች አሁንም ባህርይ ያስፈልጋቸዋል፦ "
+            + "፣ ".join(u["name"] for u in unmapped)
+            + "። ጥቆማ ይምረጡ ወይም ከታች ይፈልጉ።"
         )
-    parts.append("Edit anything in the table, then press Publish when it looks right.")
+    parts.append("በሠንጠረዡ ውስጥ የፈለጉትን ያርሙ፣ ትክክል ሲሆን «Publish» ይጫኑ።")
     return " ".join(parts)
 
 
@@ -345,7 +337,7 @@ def summarize(
     result: dict[str, Any],
     *,
     kind: str,
-    language: str = "en",
+    language: str = "am",
     client: ChatClient | None = None,
 ) -> Feedback:
     """Final feedback for a pipeline (`kind="infobox"`) or lookup (`"field"`) result."""

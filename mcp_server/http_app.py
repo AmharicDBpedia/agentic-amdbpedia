@@ -58,7 +58,14 @@ from mcp_server.consent import ConsentRequiredError, require_consent
 from mcp_server.pipeline import stream_mapping_pipeline
 from mcp_server.publish import PublishError, publish_mapping
 from mcp_server.server import MAX_PROPERTY_LENGTH, find_semantic_match_impl
-from mcp_server.wiki_fetch import WikipediaFetchError, fetch_article_wikitext
+from mcp_server.wiki_fetch import (
+    WikipediaFetchError,
+    extract_template_params,
+    fetch_article_wikitext,
+    is_template_title,
+    synthesize_infobox_wikitext,
+    template_display_name,
+)
 from rag import learned_aliases
 from rag.predict import PredictionResult, predict_property, production_predict_options
 from rag.retrieval import NoMatchFound
@@ -334,6 +341,14 @@ async def preview_mapping(request: Request) -> Response:
     template" within arbitrarily larger wikitext, so handing it a whole
     article is enough -- no need for this endpoint to special-case
     extracting "just the infobox part" itself.
+
+    A `url` may also point straight at a template *definition* page
+    (am.wikipedia's `መለጠፊያ:` namespace, the English `Template:`), e.g.
+    `.../wiki/መለጠፊያ:የምግብ_መረጃ`. A definition has no filled-in infobox to
+    find, so its declared parameters are read instead
+    (`extract_template_params`) and rendered as a synthetic infobox
+    instance (`synthesize_infobox_wikitext`) that runs through the same
+    pipeline -- mapping the template's parameter names directly.
     """
 
     with correlation_context():
@@ -383,13 +398,49 @@ async def preview_mapping(request: Request) -> Response:
                         }
                     )
                     return
-                yield _sse(
-                    {
-                        "node": "fetch_source_article",
-                        "status": "done",
-                        "detail": f'Fetched "{title}" from Wikipedia',
-                    }
-                )
+                # A template-namespace page is a definition, not a filled
+                # infobox: read its declared parameters and render them as
+                # a synthetic infobox instance so the same pipeline maps
+                # the template's parameter names directly.
+                if is_template_title(title):
+                    name = template_display_name(title)
+                    params = extract_template_params(wikitext)
+                    if not params:
+                        yield _sse(
+                            {
+                                "node": "fetch_source_article",
+                                "status": "error",
+                                "detail": f'በመለጠፊያ "{name}" ውስጥ ምንም መስክ አልተገኘም።',
+                            }
+                        )
+                        yield _sse(
+                            {
+                                "node": "result",
+                                "mappings": [],
+                                "mappingWikitext": "",
+                                "xmlRules": "",
+                                "reviewItemId": None,
+                                "warnings": [],
+                                "unmappedFields": [],
+                            }
+                        )
+                        return
+                    wikitext = synthesize_infobox_wikitext(name, params)
+                    yield _sse(
+                        {
+                            "node": "fetch_source_article",
+                            "status": "done",
+                            "detail": f'ከመለጠፊያ "{name}" {len(params)} መስኮች ተነበቡ',
+                        }
+                    )
+                else:
+                    yield _sse(
+                        {
+                            "node": "fetch_source_article",
+                            "status": "done",
+                            "detail": f'"{title}" ከዊኪፔዲያ ተገኘቷል',
+                        }
+                    )
 
             async with factory() as session:
                 async for event in stream_mapping_pipeline(
@@ -494,7 +545,7 @@ async def assist_summarize(request: Request) -> JSONResponse:
             assistant.summarize,
             body["result"],
             kind=kind,
-            language="am" if body.get("language") == "am" else "en",
+            language="en" if body.get("language") == "en" else "am",
             client=request.app.state.chat_client,
         )
         return JSONResponse({"message": feedback.message, "source": feedback.source})

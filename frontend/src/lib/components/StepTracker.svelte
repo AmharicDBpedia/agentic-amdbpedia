@@ -6,11 +6,11 @@
 	let { steps }: { steps: AgentStep[] } = $props();
 
 	const stepLabels: Record<string, string> = {
-		fetch_source_article: 'Fetch Wikipedia article',
-		extract_infobox_fields: 'Extract infobox fields',
-		predict_properties: 'Predict ontology properties',
-		format_mapping_syntax: 'Generate mapping XML',
-		persist_review_item: 'Save run record'
+		fetch_source_article: 'የዊኪፔዲያ መለጠፊያን ማምጣት',
+		extract_infobox_fields: 'የመለጠፊያ መስኮችን ማውጣት',
+		predict_properties: 'የኦንቶሎጂ ባህርያትን መተንበይ',
+		format_mapping_syntax: 'የማዛመጃ XML ማመንጨት',
+		persist_review_item: 'የሂደት መዝገብ ማስቀመጥ'
 	};
 </script>
 

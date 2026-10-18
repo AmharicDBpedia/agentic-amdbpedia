@@ -556,10 +556,10 @@ NODE_SEQUENCE: list[tuple[str, PipelineNode]] = [
 ]
 
 NODE_LABELS: dict[str, str] = {
-    "extract_infobox_fields": "Extracting infobox fields",
-    "predict_properties": "Predicting ontology properties",
-    "format_mapping_syntax": "Generating mapping XML",
-    "persist_review_item": "Saving run record",
+    "extract_infobox_fields": "የመለጠፊያ መስኮችን በማውጣት ላይ",
+    "predict_properties": "የኦንቶሎጂ ባህርያትን በመተንበይ ላይ",
+    "format_mapping_syntax": "የማዛመጃ XML በማመንጨት ላይ",
+    "persist_review_item": "የሂደት መዝገብ በማስቀመጥ ላይ",
 }
 
 

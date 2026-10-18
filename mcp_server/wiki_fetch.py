@@ -198,3 +198,71 @@ def canonical_template_name(name: str, base_url: str = DEFAULT_WIKI_BASE) -> str
     # Strip the localized namespace ("መለጠፊያ:" on am.wikipedia).
     resolved = title.split(":", 1)[1] if ":" in title else title
     return resolved or name
+
+
+# Template-definition pages (am.wikipedia's `መለጠፊያ:` namespace, the
+# English `Template:`) name their parameters as triple-brace references --
+# `{{{ስም|}}}`, `{{{የስዕል_ስፋት|240}}}` -- and usually also list them in a
+# `<templatedata>` JSON block. Mapping *from the template page itself* means
+# reading those parameter names rather than looking for a filled-in infobox
+# instance (a definition has none).
+TEMPLATE_NAMESPACE_PREFIXES = ("መለጠፊያ:", "Template:")
+_TEMPLATEDATA_RE = re.compile(r"<templatedata>(.*?)</templatedata>", re.IGNORECASE | re.DOTALL)
+_TRIPLE_BRACE_PARAM_RE = re.compile(r"\{\{\{\s*([^|{}]+?)\s*[|}]")
+
+
+def is_template_title(title: str) -> bool:
+    """True for a page in a Template namespace -- a template *definition*
+    page, not an article that merely uses one."""
+
+    stripped = title.lstrip().casefold()
+    return any(stripped.startswith(prefix.casefold()) for prefix in TEMPLATE_NAMESPACE_PREFIXES)
+
+
+def template_display_name(title: str) -> str:
+    """`መለጠፊያ:የምግብ_መረጃ` -> `የምግብ_መረጃ` -- the bare template name DBpedia
+    maps under (`Mapping am:<name>`), with the namespace prefix removed."""
+
+    return title.split(":", 1)[1].strip() if ":" in title else title.strip()
+
+
+def extract_template_params(wikitext: str) -> list[str]:
+    """Ordered, de-duplicated parameter names declared by a template
+    definition.
+
+    Prefers the `<templatedata>` block (authoritative and noise-free);
+    falls back to scanning `{{{name|...}}}` references for templates that
+    ship no TemplateData. Positional/numeric parameters are dropped --
+    they have no Amharic label to map."""
+
+    names = _params_from_templatedata(wikitext) or _TRIPLE_BRACE_PARAM_RE.findall(wikitext)
+    ordered: dict[str, None] = {}
+    for name in names:
+        cleaned = str(name).strip()
+        if cleaned and not cleaned.isdecimal():
+            ordered.setdefault(cleaned, None)
+    return list(ordered)
+
+
+def _params_from_templatedata(wikitext: str) -> list[str]:
+    match = _TEMPLATEDATA_RE.search(wikitext)
+    if match is None:
+        return []
+    try:
+        data = json.loads(match.group(1))
+    except (ValueError, TypeError):
+        return []
+    params = data.get("params") if isinstance(data, dict) else None
+    return [str(name) for name in params] if isinstance(params, dict) else []
+
+
+def synthesize_infobox_wikitext(name: str, params: list[str]) -> str:
+    """Render a template name and its parameters as a single infobox
+    *instance* (`{{name | p = | q = ...}}`), so a fetched template
+    *definition* runs through the exact same extract -> predict -> format
+    pipeline a pasted or article infobox does. Values are intentionally
+    empty: the pipeline maps parameter *names* (Amharic property labels),
+    not their values."""
+
+    body = "".join(f"| {param} = \n" for param in params)
+    return f"{{{{{name}\n{body}}}}}"

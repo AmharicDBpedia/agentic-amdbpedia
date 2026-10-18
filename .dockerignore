@@ -1,0 +1,35 @@
+# Build caches and local virtualenvs -- never belong in the image.
+.venv
+.uv-cache
+.uv-tools
+__pycache__
+*.pyc
+
+# Local runtime state: the SQLite review queue, the built embedding index,
+# and the HF model cache are all rebuilt/populated at runtime (or supplied
+# by a mounted volume), not baked into the image.
+data/.cache
+data/.hf-cache
+data/review_queue.db
+data/review_queue.db-*
+
+# Frontend is built by its own Dockerfile.
+frontend
+
+# VCS, tooling, docs, tests, CI.
+.git
+.gitignore
+.github
+.mypy_cache
+.ruff_cache
+.pytest_cache
+htmlcov
+.coverage
+*.md
+docs
+examples
+evaluation
+tests
+
+# Secrets never go in an image layer -- pass them as runtime env instead.
+.env
