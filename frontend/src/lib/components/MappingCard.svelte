@@ -53,9 +53,12 @@
 			.join(' · ')
 	);
 
+	// A property the user chose counts as confirmed (100%); typing the
+	// model's own answer back in is not a change and keeps its confidence.
 	function setProperty(row: PredictedMapping, value: string) {
+		const source = originalFor(original, row.templateProperty);
 		row.ontologyProperty = value;
-		row.confidence = 1;
+		row.confidence = source?.ontologyProperty === value ? source.confidence : 1;
 	}
 
 	function undoRow(row: PredictedMapping) {

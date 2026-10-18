@@ -314,4 +314,19 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		screen.getByRole('button', { name: 'ላክ' }).click();
 		await waitFor(() => expect(understandSpy).toHaveBeenCalledWith('{{Infobox bridge}}', 'Bridge'));
 	});
+
+	it('typing the predicted property back in is not an edit', async () => {
+		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
+
+		await submitBridgeInfobox();
+		const cell = await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		await fireEvent.input(cell, { target: { value: 'len' } });
+		await fireEvent.input(cell, { target: { value: 'length' } });
+
+		await waitFor(() => {
+			expect(cell.closest('tr')).toHaveAttribute('data-change', 'none');
+			expect(screen.getByText('75%')).toBeInTheDocument();
+			expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
+		});
+	});
 });

@@ -1,5 +1,7 @@
 # Changelog
 
+- `docs: README updated for the Amharic single-chat UI; architecture diagram as an editable Excalidraw scene (docs/architecture.excalidraw, exported to docs/architecture.svg)`
+- `fix(ui): typing a row's predicted property back in keeps its confidence instead of jumping to 100%`
 - `feat(ui): Amharic for every remaining UI string (mapping card, sidebar, class chip, publish and clear dialogs, Coverage, 404); sidebar link to the usage guide (static/documentation.html)`
 - `feat(ui): one chat per tab with no history (sessionStorage, Clear chat asks before dropping unpublished edits); class picker moved into the message box as a chip`
 - `feat(ui): mapping card with every field in one table; edited, added, removed and AI-proposed rows marked, change count, Undo all, before → after list in the publish dialog`
