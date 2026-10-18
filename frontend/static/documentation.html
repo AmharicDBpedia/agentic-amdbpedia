@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>Amharic–DBpedia Mapping — Usage Guide</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@400;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #1a1a1a;
+				--muted: #5c5c5c;
+				--border: #e4e4e7;
+				--accent: #c2410c;
+				--code-bg: #f4f4f5;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #0f0f11;
+					--fg: #ededed;
+					--muted: #a1a1aa;
+					--border: #27272a;
+					--accent: #fb923c;
+					--code-bg: #1c1c1f;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--fg);
+				font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans Ethiopic', sans-serif;
+				line-height: 1.7;
+			}
+			main {
+				max-width: 820px;
+				margin: 0 auto;
+				padding: 2.5rem 1.25rem 5rem;
+			}
+			h1 {
+				font-size: 1.9rem;
+				font-weight: 700;
+				margin-bottom: 0.25rem;
+			}
+			h2 {
+				font-size: 1.35rem;
+				font-weight: 600;
+				margin-top: 2.75rem;
+				border-bottom: 1px solid var(--border);
+				padding-bottom: 0.4rem;
+			}
+			h3 {
+				font-size: 1.05rem;
+				font-weight: 600;
+				margin-top: 1.75rem;
+			}
+			p,
+			li {
+				color: var(--fg);
+			}
+			.lead {
+				color: var(--muted);
+				font-size: 1.05rem;
+			}
+			code {
+				background: var(--code-bg);
+				padding: 0.1rem 0.35rem;
+				border-radius: 0.3rem;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 0.9em;
+				direction: ltr;
+				unicode-bidi: embed;
+			}
+			ol.steps {
+				counter-reset: step;
+				list-style: none;
+				padding: 0;
+			}
+			ol.steps > li {
+				counter-increment: step;
+				position: relative;
+				padding: 0.85rem 1rem 0.85rem 3.25rem;
+				margin: 0.6rem 0;
+				border: 1px solid var(--border);
+				border-radius: 0.6rem;
+			}
+			ol.steps > li::before {
+				content: counter(step);
+				position: absolute;
+				left: 0.85rem;
+				top: 0.85rem;
+				width: 1.7rem;
+				height: 1.7rem;
+				display: grid;
+				place-items: center;
+				background: var(--accent);
+				color: #fff;
+				border-radius: 999px;
+				font-weight: 700;
+				font-size: 0.95rem;
+			}
+			ol.steps > li .am {
+				display: block;
+				color: var(--muted);
+				font-size: 0.9rem;
+			}
+			.example {
+				border: 1px solid var(--border);
+				border-left: 4px solid var(--accent);
+				border-radius: 0.6rem;
+				padding: 1rem 1.25rem;
+				background: var(--code-bg);
+			}
+			.note {
+				background: color-mix(in srgb, var(--accent) 10%, transparent);
+				border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+				border-radius: 0.6rem;
+				padding: 1rem 1.25rem;
+			}
+			a {
+				color: var(--accent);
+			}
+			.back {
+				display: inline-block;
+				margin-bottom: 1.5rem;
+				font-size: 0.9rem;
+			}
+			footer {
+				margin-top: 3rem;
+				padding-top: 1.25rem;
+				border-top: 1px solid var(--border);
+				color: var(--muted);
+				font-size: 0.85rem;
+			}
+			figure.shot {
+				margin: 1.25rem 0;
+			}
+			figure.shot img {
+				max-width: 100%;
+				height: auto;
+				border: 1px solid var(--border);
+				border-radius: 0.5rem;
+				display: block;
+			}
+			figure.shot figcaption {
+				margin-top: 0.6rem;
+				font-size: 0.8rem;
+				color: var(--muted);
+				line-height: 1.55;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<a class="back" href="/">← Back to the app</a>
+
+			<h1>Amharic → DBpedia Mapping</h1>
+			<p class="lead">
+				This app maps Amharic Wikipedia infobox fields to the English DBpedia ontology.
+				Paste a Wikipedia template link, the app suggests matching properties, and after
+				you review and approve them, the mapping is published to
+				<code>mappings.dbpedia.org</code>.
+			</p>
+
+			<h2>What is an infobox?</h2>
+			<p>
+				An <strong>infobox</strong> is the summary box shown at the top of a Wikipedia
+				article that presents an entity's key facts as <code>field = value</code> pairs. For
+				example, the Addis Ababa article's infobox lists its country, founding year,
+				population, area, elevation, time zone, and more.
+			</p>
+			<figure class="shot">
+				<img
+					src="images/addis_ababa_infobox.png"
+					alt="The infobox on the Amharic Addis Ababa Wikipedia article"
+					style="max-width: 340px;"
+				/>
+				<figcaption>
+					The infobox on the Amharic Addis Ababa article, showing its facts as
+					<code>field = value</code> pairs.
+				</figcaption>
+			</figure>
+			<p>
+				Every infobox is produced by a Wikipedia <em>template</em>. On Amharic Wikipedia,
+				places such as cities use the
+				<a href="https://am.wikipedia.org/wiki/መለጠፊያ:የቦታ_መረጃ" target="_blank" rel="noreferrer"
+					>መለጠፊያ:የቦታ_መረጃ</a
+				>
+				(Place) template, which declares the field names an article can fill in:
+			</p>
+			<figure class="shot">
+				<img
+					src="images/infobox_template_place_information.png"
+					alt="The blank parameter list of the Amharic Place infobox template"
+					style="max-width: 420px;"
+				/>
+				<figcaption>
+					The የቦታ መረጃ (Place) template's parameter list — these Amharic field names
+					(<code>ስም</code>, <code>ስዕል</code>, <code>ባንዲራ</code>, …) are what a mapping
+					assigns ontology properties to.
+				</figcaption>
+			</figure>
+			<p>
+				That template is mapped to the ontology on the DBpedia mappings wiki at
+				<a
+					href="https://mappings.dbpedia.org/index.php/Mapping_am:የቦታ_መረጃ"
+					target="_blank"
+					rel="noreferrer">Mapping am:የቦታ_መረጃ</a
+				>, which declares that the template describes a <code>Place</code> and that, for
+				instance, the field <code>ስም</code> is <code>foaf:name</code>, <code>ስዕል</code> is
+				<code>image</code>, and <code>ባንዲራ</code> is <code>flag</code>.
+			</p>
+			<figure class="shot">
+				<img
+					src="images/dbpedia_mapping_for_place.png"
+					alt="The DBpedia mapping page for the Amharic Place template"
+					style="max-width: 560px;"
+				/>
+				<figcaption>
+					The published mapping (<code>Mapping am:የቦታ መረጃ</code>): <code>mapToClass =
+					Place</code>, with each template property mapped to an ontology property.
+				</figcaption>
+			</figure>
+			<p>
+				With that mapping in place, the
+				<a href="https://github.com/dbpedia/extraction-framework" target="_blank" rel="noreferrer"
+					>DBpedia extraction framework</a
+				>
+				can read the infobox on every article that uses the template and extract its facts
+				automatically — turning free-form wiki markup into structured data.
+			</p>
+
+			<h2>What is DBpedia mapping?</h2>
+			<p>
+				<strong>DBpedia</strong> is a structured knowledge base extracted from Wikipedia. It
+				turns the information Wikipedia presents into machine-readable properties and
+				classes, so the data can be searched, linked, and reused by other applications.
+			</p>
+			<p>
+				Wikipedia infobox field names differ by language — in Amharic they are written
+				<code>ርዝመት</code>, <code>የተወለደበት_ዓመት</code>. The DBpedia ontology, however, has a
+				single, unified set of properties written in English — <code>length</code>,
+				<code>birthYear</code>. A <strong>mapping</strong> is the rule that says "this
+				Amharic field corresponds to this ontology property."
+			</p>
+			<p>A mapping connects two things:</p>
+			<ul>
+				<li>
+					<strong>Template → class</strong>: e.g. the template <code>መረጃሳጥን ድልድይ</code>
+					maps to the <code>Bridge</code> class.
+				</li>
+				<li>
+					<strong>Field → property</strong>: e.g. the field <code>ርዝመት</code> maps to the
+					<code>length</code> property.
+				</li>
+			</ul>
+			<p>
+				Without a mapping, Amharic Wikipedia infobox data is never extracted into DBpedia.
+				So creating a mapping for each Amharic template contributes Amharic knowledge to the
+				global semantic web.
+			</p>
+
+			<h2>How the DBpedia extraction framework works</h2>
+			<p>
+				The
+				<a href="https://github.com/dbpedia/extraction-framework" target="_blank" rel="noreferrer"
+					>DBpedia extraction framework</a
+				>
+				reads Wikipedia content, applies the ontology mappings described above, and emits
+				structured facts. The pipeline looks like this:
+			</p>
+			<figure class="shot">
+				<img
+					src="images/dbpedia_extraction_framework.png"
+					alt="The DBpedia extraction framework architecture: Wikipedia and ontology mappings feed the Extraction Manager (Input, Parsing, Extraction, Output), producing a DBpedia dump and a Virtuoso triple store exposed as a SPARQL endpoint and Linked Data"
+				/>
+				<figcaption>
+					The DBpedia extraction framework architecture. Diagram from C. Bizer et al.,
+					“DBpedia — A crystallization point for the Web of Data,” Journal of Web Semantics
+					7(3):154–165, 2009; see also J. Lehmann et al., “DBpedia — A Large-scale,
+					Multilingual Knowledge Base Extracted from Wikipedia,” Semantic Web Journal
+					6(2):167–195, 2015. Source:
+					<a href="https://github.com/dbpedia/extraction-framework" target="_blank" rel="noreferrer"
+						>github.com/dbpedia/extraction-framework</a
+					>.
+				</figcaption>
+			</figure>
+			<p>
+				In short: Wikipedia content (a dump or the live API) is read, the Wiki Parser turns
+				the markup into a tree, and a set of extractors run over it — the
+				<strong>mapping-based</strong> extractor is the one that uses the ontology mappings
+				above to read infobox fields. The results are written out by the sinks to a DBpedia
+				dump and a Virtuoso triple store, which are exposed to the web as a SPARQL endpoint
+				and as Linked Data for DBpedia apps, SPARQL clients, and RDF/HTML browsers.
+			</p>
+
+			<h2>Why RDF — what's the point?</h2>
+			<p>
+				The extracted facts are stored as <strong>RDF</strong> (Resource Description
+				Framework) triples — each fact is a <code>subject → predicate → object</code>
+				statement, for example <code>dbr:Addis_Ababa dbo:country dbr:Ethiopia</code>. Storing
+				the data this way matters because it is:
+			</p>
+			<ul>
+				<li>
+					<strong>Machine-readable</strong> — applications can consume the facts directly
+					instead of scraping human-readable pages.
+				</li>
+				<li>
+					<strong>Linked and interoperable</strong> — every entity and property is a URI, so
+					facts from different sources connect into one global graph (Linked Open Data).
+				</li>
+				<li>
+					<strong>Queryable</strong> — you can ask precise questions with SPARQL, e.g. “every
+					Ethiopian city with a population over one million.”
+				</li>
+				<li>
+					<strong>Language-independent</strong> — Amharic infobox facts join the same graph as
+					facts from every other language edition, under shared ontology properties.
+				</li>
+			</ul>
+			<p>
+				Without this step, the knowledge inside Amharic infoboxes stays locked in
+				human-readable pages. As RDF it becomes data that search engines, applications, and
+				researchers can actually query and reuse.
+			</p>
+
+			<h2>How to use the app</h2>
+			<p>There are three ways to provide input. Paste any of them into the chat box:</p>
+
+			<h3>1. A Wikipedia template link</h3>
+			<p>
+				Paste a template page URL. For example:
+				<br />
+				<code>https://am.wikipedia.org/wiki/መለጠፊያ:የምግብ_መረጃ</code>
+				<br />
+				The app extracts the template's fields on its own and maps each one. This is the
+				best way to prepare a complete template.
+			</p>
+
+			<h3>2. Infobox wikitext</h3>
+			<p>Paste the infobox wikitext directly:</p>
+			<div class="example">
+				<code>{{Infobox bridge | ስም = ደደሳ ድልድይ | ርዝመት = 1,700 ሜትር}}</code>
+			</div>
+
+			<h3>3. A single field name</h3>
+			<p>
+				To ask about just one field, type its name — e.g. <code>አይካኦ_ኮድ</code> — and the app
+				suggests the matching DBpedia property.
+			</p>
+
+			<h2>The steps the app runs</h2>
+			<p>When you submit a template, the app performs these five steps:</p>
+			<ol class="steps">
+				<li>
+					Fetch Wikipedia template
+					<span class="am">የዊኪፔዲያ መለጠፊያን ማምጣት</span>
+				</li>
+				<li>
+					Extract template fields
+					<span class="am">የመለጠፊያ መስኮችን ማውጣት</span>
+				</li>
+				<li>
+					Predict ontology properties
+					<span class="am">የኦንቶሎጂ ባህርያትን መተንበይ</span>
+				</li>
+				<li>
+					Generate mapping XML
+					<span class="am">የማዛመጃ XML ማመንጨት</span>
+				</li>
+				<li>
+					Save run record
+					<span class="am">የሂደት መዝገብ ማስቀመጥ</span>
+				</li>
+			</ol>
+
+			<h2>Example result</h2>
+			<p>After the steps, the app gives you a summary like this:</p>
+			<div class="example">
+				<p>
+					A total of 11 fields were mapped for the <code>Currency</code> class. The mappings
+					for <code>የስዕል_ስፋት</code>, <code>የISO_ኮድ</code>, <code>ምልክት</code>,
+					<code>ተጠቃሚ_ሀገሮች</code>, and <code>የተዋወቀበት_ቀን</code> were suggested by the AI
+					model and should be verified. There are 13 unmapped fields, such as
+					<code>የISO_ቁጥር</code> (closest suggestion: <code>casNumber</code>) and
+					<code>ንዑስ_ሬሾ</code> (closest suggestion: <code>aircraftHelicopterTransport</code>).
+					You can edit the table to adjust these mappings and then press Publish.
+				</p>
+			</div>
+			<p>In the summary:</p>
+			<ul>
+				<li>
+					<strong>Mapped fields</strong> — properties the app found with confidence.
+				</li>
+				<li>
+					<strong>AI-proposed</strong> — guessed by the language model; verify before
+					publishing.
+				</li>
+				<li>
+					<strong>Unmapped fields</strong> — no matching property was found; the closest
+					suggestion is shown for each.
+				</li>
+			</ul>
+
+			<h2>How a mapping is created and built</h2>
+			<p>
+				Mappings live on the <code>mappings.dbpedia.org</code> wiki, each template having its
+				own <code>Mapping am:&lt;template_name&gt;</code> page. A mapping is written in the
+				MediaWiki <code>{{TemplateMapping}}</code> syntax:
+			</p>
+			<div class="example">
+				<pre style="margin: 0; direction: ltr; overflow-x: auto; white-space: pre-wrap;">{{TemplateMapping
+ | mapToClass = Bridge
+ | mappings =
+   {{PropertyMapping | templateProperty = ርዝመት | ontologyProperty = length }}
+   {{PropertyMapping | templateProperty = ስፋት  | ontologyProperty = width }}
+}}</pre>
+			</div>
+			<p>In this syntax:</p>
+			<ul>
+				<li>
+					<code>mapToClass</code> — sets the ontology class the template represents (e.g.
+					<code>Bridge</code>).
+				</li>
+				<li>
+					<code>PropertyMapping</code> — maps one field to one property.
+					<code>templateProperty</code> is the Amharic field name and
+					<code>ontologyProperty</code> is the matching DBpedia property.
+				</li>
+			</ul>
+
+			<h3>Two ways to build a mapping</h3>
+			<p>
+				<strong>1. Manually</strong> — create the <code>Mapping am:</code> page on the
+				<code>mappings.dbpedia.org</code> wiki and write the
+				<code>{{TemplateMapping}}</code> syntax above by hand. This requires deep knowledge of
+				the DBpedia ontology properties.
+			</p>
+			<p>
+				<strong>2. With this app (recommended)</strong> — the app searches for and suggests
+				matching properties; after you review and correct them, pressing Publish writes the
+				<code>{{TemplateMapping}}</code> page for you. Follow these steps:
+			</p>
+			<ol>
+				<li>Paste the template URL or the infobox wikitext into the chat box.</li>
+				<li>
+					Review the proposed mappings in the table — verify the AI-proposed ones in
+					particular.
+				</li>
+				<li>
+					Fix any wrong mapping; for unmapped fields, pick from the suggestions or search the
+					ontology.
+				</li>
+				<li>When you are satisfied it is correct, press Publish.</li>
+			</ol>
+
+			<h2>Editing and publishing</h2>
+			<div class="note">
+				<p>
+					Nothing is published automatically. Edit the mappings in the table, and once you
+					have confirmed they are correct, press Publish. Publishing writes directly to the
+					live <code>mappings.dbpedia.org</code> wiki, so it always shows a confirmation
+					dialog first. To publish, a MediaWiki bot account (bot username and bot password)
+					must be set in <code>.env</code>.
+				</p>
+			</div>
+
+			<footer>For more information, see the project's <code>README.md</code>.</footer>
+		</main>
+	</body>
+</html>

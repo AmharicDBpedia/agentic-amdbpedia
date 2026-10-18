@@ -192,7 +192,7 @@
 							mappings: turn.mappings,
 							unmappedFields: turn.unmappedFields
 						},
-						plan.language
+						'am'
 					);
 				}
 			} catch (err) {
@@ -222,7 +222,7 @@
 			if (plan.intent === 'rejected') {
 				turn.error = plan.reply ?? 'Rejected: prompt-injection attempt detected.';
 			} else if (plan.intent === 'unsupported') {
-				turn.reply = plan.reply ?? 'Paste an infobox, a Wikipedia link, or a field name.';
+				turn.reply = plan.reply ?? 'የመረጃ ሳጥን፣ የዊኪፔዲያ አድራሻ ወይም የመስክ ስም ያስገቡ።';
 			} else {
 				try {
 					const result = await findSemanticMatch(plan.text, cls);
@@ -236,7 +236,7 @@
 						} else {
 							turn.matches = result.matches;
 						}
-						turn.feedback = await summarizeResult('field', result, plan.language);
+						turn.feedback = await summarizeResult('field', result, 'am');
 					}
 				} catch (err) {
 					console.error('Assistant lookup failed:', err);
@@ -313,12 +313,12 @@
 
 	const examples = [
 		{
-			label: 'Paste an infobox to map',
+			label: 'የመረጃ ሳጥን ለማዛመድ ይለጥፉ',
 			value: `{{Infobox bridge\n| ስም = ደደሳ ድልድይ\n| ርዝመት = 1,700 ሜትር\n}}`
 		},
-		{ label: 'Ask what a field maps to', value: 'አይካኦ_ኮድ' },
+		{ label: 'አንድ መስክ ምን እንደሚዛመድ ይጠይቁ', value: 'አይካኦ_ኮድ' },
 		{
-			label: 'Or a Wikipedia link',
+			label: 'ወይም የዊኪፔዲያ አድራሻ',
 			value: 'https://am.wikipedia.org/wiki/ታላቁ_የኢትዮጵያ_ሕዳሴ_ግድብ'
 		}
 	];
@@ -330,10 +330,10 @@
 			<div class="flex h-full flex-col items-center justify-center gap-6 text-center">
 				<img src={logo} alt="Amharic DBpedia" class="size-16 object-contain" />
 				<div>
-					<h1 class="text-2xl font-semibold tracking-tight">Amharic → DBpedia Mapping Assistant</h1>
+					<h1 class="text-2xl font-semibold tracking-tight">የአማርኛ → DBpedia ማዛመጃ</h1>
 					<p class="mt-2 text-sm text-muted-foreground">
-						Paste an infobox, a Wikipedia article link, or ask about a field in Amharic or English.
-						Edit the result right here; nothing is published until you press Publish.
+						የመረጃ ሳጥን፣ የዊኪፔዲያ የገጽ አድራሻ ይለጥፉ፣ ወይም ስለ መስክ ይጠይቁ። ውጤቱን እዚህ ያርሙ፤
+						«Publish» እስከሚጫኑ ድረስ ምንም አይታተምም።
 					</p>
 				</div>
 				<div class="flex flex-wrap justify-center gap-2">
@@ -514,7 +514,7 @@
 													<div class="mt-2 flex gap-2">
 														<Input
 															class="h-8 text-xs"
-															placeholder="Search the ontology…"
+															placeholder="ኦንቶሎጂውን ይፈልጉ…"
 															bind:value={entry.query}
 															onkeydown={(e) => {
 																if (e.key === 'Enter') {
@@ -667,7 +667,7 @@
 			<div class="px-3 pt-2.5">
 				<Input
 					bind:value={targetClass}
-					placeholder="Target class (optional, e.g. Bridge)"
+					placeholder="ዒላማ ክፍል (አማራጭ፣ ለምሳሌ Bridge)"
 					class="h-6 border-none bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
 				/>
 			</div>
@@ -675,7 +675,7 @@
 				<Textarea
 					bind:value={input}
 					onkeydown={onKeydown}
-					placeholder="Paste an infobox, a Wikipedia link, or ask about a field (Amharic or English)…"
+					placeholder="የመረጃ ሳጥን፣ የዊኪፔዲያ አድራሻ ወይም ስለ መስክ ይጠይቁ…"
 					rows={1}
 					class="max-h-48 min-h-9 resize-none border-none bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
 				/>
@@ -684,7 +684,7 @@
 					class="mb-0.5 size-8 shrink-0 rounded-full"
 					disabled={busy || !input.trim()}
 					onclick={() => submit()}
-					aria-label="Send"
+					aria-label="ላክ"
 				>
 					<Fa icon={faArrowUp} class="size-3.5" />
 				</Button>

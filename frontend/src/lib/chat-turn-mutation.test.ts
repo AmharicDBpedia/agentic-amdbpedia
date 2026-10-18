@@ -50,13 +50,13 @@ function plan(overrides: Partial<api.InputPlan> = {}): api.InputPlan {
 
 async function send(text: string) {
 	render(ChatPage);
-	const textarea = screen.getByPlaceholderText(/Paste an infobox/i) as HTMLTextAreaElement;
+	const textarea = screen.getByPlaceholderText(/የመረጃ ሳጥን/) as HTMLTextAreaElement;
 	textarea.value = text;
 	textarea.dispatchEvent(new Event('input', { bubbles: true }));
 	await waitFor(() => {
-		expect(screen.getByRole('button', { name: /send/i })).not.toBeDisabled();
+		expect(screen.getByRole('button', { name: 'ላክ' })).not.toBeDisabled();
 	});
-	screen.getByRole('button', { name: /send/i }).click();
+	screen.getByRole('button', { name: 'ላክ' }).click();
 }
 
 const submitBridgeInfobox = () => send('{{Infobox bridge\n| ርዝመት = 1,700 ሜትር\n}}');
@@ -82,7 +82,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 
 		await submitBridgeInfobox();
 
-		await waitFor(() => expect(screen.getByText('Extract infobox fields')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('የመለጠፊያ መስኮችን ማውጣት')).toBeInTheDocument());
 		// Groq's class is passed on to the pipeline.
 		expect(previewSpy).toHaveBeenCalledWith(plan().text, 'Bridge');
 		await waitFor(() => expect(screen.getByDisplayValue('length')).toBeInTheDocument());
@@ -97,7 +97,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		expect(api.summarizeResult).toHaveBeenCalledWith(
 			'infobox',
 			expect.objectContaining({ domainClass: 'Bridge' }),
-			'en'
+			'am'
 		);
 	});
 

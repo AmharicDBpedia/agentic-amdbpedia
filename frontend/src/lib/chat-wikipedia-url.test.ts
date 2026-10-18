@@ -59,14 +59,14 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 
 		render(ChatPage);
 
-		const textarea = screen.getByPlaceholderText(/Paste an infobox/i) as HTMLTextAreaElement;
+		const textarea = screen.getByPlaceholderText(/የመረጃ ሳጥን/) as HTMLTextAreaElement;
 		textarea.value = GERD_URL;
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /send/i })).not.toBeDisabled();
+			expect(screen.getByRole('button', { name: 'ላክ' })).not.toBeDisabled();
 		});
-		screen.getByRole('button', { name: /send/i }).click();
+		screen.getByRole('button', { name: 'ላክ' }).click();
 
 		// The actual thing under test: a pasted link must run the pipeline
 		// (previewMapping), never the plain-question lookup
@@ -82,7 +82,7 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 		// has to know this node name or it would fall back to the raw
 		// "fetch_source_article" node string instead.
 		await waitFor(() => {
-			expect(screen.getByText('Fetch Wikipedia article')).toBeInTheDocument();
+			expect(screen.getByText('የዊኪፔዲያ መለጠፊያን ማምጣት')).toBeInTheDocument();
 			expect(screen.getByDisplayValue('river')).toBeInTheDocument();
 		});
 	});
@@ -113,17 +113,17 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 
 		render(ChatPage);
 
-		const textarea = screen.getByPlaceholderText(/Paste an infobox/i) as HTMLTextAreaElement;
+		const textarea = screen.getByPlaceholderText(/የመረጃ ሳጥን/) as HTMLTextAreaElement;
 		textarea.value = 'https://am.wikipedia.org/wiki/ThisPageDoesNotExist';
 		textarea.dispatchEvent(new Event('input', { bubbles: true }));
 
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /send/i })).not.toBeDisabled();
+			expect(screen.getByRole('button', { name: 'ላክ' })).not.toBeDisabled();
 		});
-		screen.getByRole('button', { name: /send/i }).click();
+		screen.getByRole('button', { name: 'ላክ' }).click();
 
 		await waitFor(() => {
-			expect(screen.getByText('Fetch Wikipedia article')).toBeInTheDocument();
+			expect(screen.getByText('የዊኪፔዲያ መለጠፊያን ማምጣት')).toBeInTheDocument();
 			expect(screen.getByText(/404: Not Found/)).toBeInTheDocument();
 		});
 	});

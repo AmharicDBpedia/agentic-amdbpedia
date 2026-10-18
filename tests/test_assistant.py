@@ -158,8 +158,8 @@ def test_summarize_falls_back_when_groq_fails() -> None:
 def test_rules_summary_flags_llm_rows_and_unmapped_fields() -> None:
     message = rules_summary(RESULT, kind="infobox")
 
-    assert "2 fields" in message and "Museum" in message
-    assert "visitorsPerYear" in message and "check" in message
+    assert "2 መስኮች" in message and "Museum" in message
+    assert "visitorsPerYear" in message and "ያረጋግጡ" in message
     assert "ተቆጣጣሪ" in message
 
 
@@ -167,7 +167,7 @@ def test_rules_summary_for_a_field_lookup() -> None:
     assert "`editor`" in rules_summary(
         {"matches": [{"property": "editor", "payload": {"source": "llm"}}]}, kind="field"
     )
-    assert "couldn't" in rules_summary({"matches": [], "suggestions": []}, kind="field")
+    assert "አልቻልኩም" in rules_summary({"matches": [], "suggestions": []}, kind="field")
 
 
 def test_unknown_properties_ignores_prefixes_and_known_names() -> None:

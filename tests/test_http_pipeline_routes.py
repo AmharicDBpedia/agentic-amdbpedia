@@ -293,6 +293,84 @@ def test_preview_accepts_a_wikipedia_url_and_fetches_it_before_the_pipeline_runs
     ]
 
 
+def test_preview_reads_template_parameters_from_a_template_page_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("mcp_server.pipeline.predict_property", _fake_predict_property)
+
+    # A template *definition* page: no filled infobox, parameters declared
+    # as triple-brace references plus a <templatedata> block.
+    definition = (
+        '<includeonly>{| class="infobox"\n! {{{ርዝመት|}}}\n|}</includeonly>'
+        "<noinclude><templatedata>\n"
+        '{"params": {"ርዝመት": {}}}\n'
+        "</templatedata></noinclude>"
+    )
+
+    def fake_fetch_article(url: str) -> tuple[str, str]:
+        return "መለጠፊያ:ድልድይ_መረጃ", definition
+
+    app = _in_memory_app(fetch_article_func=fake_fetch_article)
+
+    with (
+        TestClient(app) as client,
+        client.stream(
+            "POST",
+            "/v1/preview",
+            json={
+                "url": "https://am.wikipedia.org/wiki/መለጠፊያ:ድልድይ_መረጃ",
+                "target_class": "Bridge",
+            },
+        ) as response,
+    ):
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    events = _parse_sse_events(body)
+    assert [event["node"] for event in events] == [
+        "fetch_source_article",
+        "extract_infobox_fields",
+        "predict_properties",
+        "format_mapping_syntax",
+        "persist_review_item",
+        "result",
+    ]
+    assert events[0]["status"] == "done"
+    assert "ድልድይ_መረጃ" in str(events[0]["detail"])
+    assert events[-1]["mappings"] == [
+        {
+            "templateProperty": "ርዝመት",
+            "ontologyProperty": "length",
+            "confidence": 1.0,
+            "source": "retrieval",
+        }
+    ]
+
+
+def test_preview_reports_a_template_page_with_no_parameters_as_an_error_step() -> None:
+    def fake_fetch_article(url: str) -> tuple[str, str]:
+        return "መለጠፊያ:ባዶ", "<includeonly></includeonly>"
+
+    app = _in_memory_app(fetch_article_func=fake_fetch_article)
+
+    with (
+        TestClient(app) as client,
+        client.stream(
+            "POST",
+            "/v1/preview",
+            json={"url": "https://am.wikipedia.org/wiki/መለጠፊያ:ባዶ"},
+        ) as response,
+    ):
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+
+    events = _parse_sse_events(body)
+    assert [event["node"] for event in events] == ["fetch_source_article", "result"]
+    assert events[0]["status"] == "error"
+    assert "ምንም መስክ" in str(events[0]["detail"])
+    assert events[1]["mappings"] == []
+
+
 def test_preview_reports_a_failed_wikipedia_fetch_as_an_error_step_not_a_500(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

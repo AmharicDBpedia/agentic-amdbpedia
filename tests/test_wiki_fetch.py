@@ -198,3 +198,75 @@ def test_canonical_template_name_keeps_the_name_when_offline() -> None:
     canonical_template_name.cache_clear()
     with mock.patch("mcp_server.wiki_fetch._http_get", side_effect=WikipediaFetchError("offline")):
         assert canonical_template_name("የቦታ መረጃ") == "የቦታ መረጃ"
+
+
+TEMPLATE_DEFINITION = (
+    '<includeonly>{| class="infobox hrecipe"\n'
+    "! {{{ስም|}}}\n"
+    "{{#if: {{{ዓይነት|}}}| ! ዓይነት {{!}} {{{ዓይነት}}} }}\n"
+    "{{#if: {{{ዋና_ግብዓቶች|}}}| ! {{{ዋና_ግብዓቶች}}} }}\n"
+    "|}</includeonly><noinclude><templatedata>\n"
+    '{"params": {"ስም": {}, "ዓይነት": {}, "ሀገር": {}, "ዋና_ግብዓቶች": {}, "ካሎሪ": {}}}\n'
+    "</templatedata></noinclude>"
+)
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("መለጠፊያ:የምግብ_መረጃ", True),
+        ("Template:Infobox food", True),
+        ("template:infobox food", True),
+        ("ታላቁ_የኢትዮጵያ_ሕዳሴ_ግድብ", False),
+        ("Ethiopia", False),
+    ],
+)
+def test_is_template_title(title: str, expected: bool) -> None:
+    from mcp_server.wiki_fetch import is_template_title
+
+    assert is_template_title(title) is expected
+
+
+def test_template_display_name_strips_the_namespace_prefix() -> None:
+    from mcp_server.wiki_fetch import template_display_name
+
+    assert template_display_name("መለጠፊያ:የምግብ_መረጃ") == "የምግብ_መረጃ"
+    assert template_display_name("Template:Infobox food") == "Infobox food"
+
+
+def test_extract_template_params_prefers_templatedata() -> None:
+    from mcp_server.wiki_fetch import extract_template_params
+
+    assert extract_template_params(TEMPLATE_DEFINITION) == [
+        "ስም",
+        "ዓይነት",
+        "ሀገር",
+        "ዋና_ግብዓቶች",
+        "ካሎሪ",
+    ]
+
+
+def test_extract_template_params_falls_back_to_triple_braces() -> None:
+    from mcp_server.wiki_fetch import extract_template_params
+
+    # No <templatedata> block -- parameters are only visible as references,
+    # and a positional {{{1}}} is dropped as having no label to map.
+    wikitext = "{{{ስም|}}} {{{የስዕል_ስፋት|240}}} {{{ስም}}} {{{1}}}"
+    assert extract_template_params(wikitext) == ["ስም", "የስዕል_ስፋት"]
+
+
+def test_synthesize_infobox_wikitext_is_recognized_by_the_pipeline() -> None:
+    from mcp_server.pipeline import extract_first_infobox
+    from mcp_server.wiki_fetch import (
+        extract_template_params,
+        synthesize_infobox_wikitext,
+        template_display_name,
+    )
+
+    name = template_display_name("መለጠፊያ:የምግብ_መረጃ")
+    params = extract_template_params(TEMPLATE_DEFINITION)
+    template = extract_first_infobox(synthesize_infobox_wikitext(name, params))
+
+    assert template is not None
+    assert template.name == "የምግብ_መረጃ"
+    assert [field.name for field in template.fields] == params

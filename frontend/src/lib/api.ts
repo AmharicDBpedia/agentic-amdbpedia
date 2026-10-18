@@ -195,7 +195,7 @@ export async function understandInput(text: string, targetClass?: string): Promi
 export async function summarizeResult(
 	kind: 'infobox' | 'field',
 	result: Record<string, unknown>,
-	language: 'am' | 'en' = 'en'
+	language: 'am' | 'en' = 'am'
 ): Promise<{ message: string; source: 'groq' | 'rules' } | null> {
 	try {
 		const res = await fetch(`${CROSS_LINGUAL_URL}/v1/assist/summarize`, {
