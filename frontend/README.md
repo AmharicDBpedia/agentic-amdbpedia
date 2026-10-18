@@ -18,51 +18,57 @@ DEF-extraction-output crawl. A screen whose endpoint isn't reachable fails
 closed into a visible "not reachable yet" message instead of crashing or
 showing fake data — that's intentional, not a bug to fix later.
 
-| Screen                   | Calls                                           | Status                                                                       |
-| ------------------------ | ----------------------------------------------- | ---------------------------------------------------------------------------- |
-| Chat (`/`)               | `cross-lingual` `POST /v1/preview` (SSE)        | **Exists** — `mcp_server/http_app.py`, refs implementation.md 16.3           |
-| Chat (`/`)               | `cross-lingual` `POST /v1/find-semantic-match`  | **Exists** — refs implementation.md 16.3                                     |
-| Review Queue (`/review`) | `cross-lingual` `GET /v1/reviews`               | **Exists** — `mcp_server/http_app.py`, refs implementation.md 14.1           |
-| Review Queue (`/review`) | `cross-lingual` `POST /v1/reviews/:id/decision` | **Exists** — refs implementation.md 14.2/14.3 (correction + publish support) |
-| Coverage (`/coverage`)   | `cross-lingual` `GET /v1/coverage`              | **Exists** — `mcp_server/http_app.py` + `db/session.py::coverage_stats`      |
+| Screen                 | Calls                                                     | Status                                                                 |
+| ---------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Chat (`/`)             | `POST /v1/assist/understand`, `POST /v1/assist/summarize` | **Exists**: Groq reads each message and writes the final reply         |
+| Chat (`/`)             | `POST /v1/preview` (SSE), `POST /v1/find-semantic-match`  | **Exists**: `mcp_server/http_app.py`                                   |
+| Chat (`/`)             | `POST /v1/publish`                                        | **Exists**: writes `Mapping am:<template>` on mappings.dbpedia.org     |
+| Coverage (`/coverage`) | `GET /v1/coverage`                                        | **Exists**: `mcp_server/http_app.py` + `db/session.py::coverage_stats` |
+
+## Language
+
+Every user-facing string is in Amharic (labels, placeholders, buttons,
+dialogs, tooltips, `aria-label`s and errors), and Groq's replies are
+requested in Amharic. DBpedia property and class names, `Mapping am:` page
+titles and the «Publish» button stay as they are, since the Amharic replies
+refer to «Publish» by name. The sidebar links to the English usage guide,
+`static/documentation.html`, as a full page load (`data-sveltekit-reload`) so
+the router doesn't treat it as an app route.
 
 ## Chat (`/`)
 
-One conversation, one input — pasting an infobox and asking about a single
-field are the same box, not two separate panels. Input starting with
-`{{Infobox` (case-insensitive) runs the full extract → predict → format →
-persist pipeline over SSE, streaming each node's progress inline as part of
-the assistant's turn; anything else runs a quick grounded lookup
-(`find_semantic_match`) instead. Every pipeline run also lands in the
-Review Queue regardless of what's shown here — this page is a preview, not
-the approval step.
+One conversation and one message box. There are no user accounts, so there
+is no chat history: the conversation is kept in the browser tab
+(`sessionStorage`, `src/lib/chat.svelte.ts`) so a reload keeps unpublished
+edits, and it is gone when the tab closes or the user presses **Clear chat**
+in the sidebar (which asks first if some edits are unpublished).
 
-## Human-in-the-loop review
+The message can be an infobox, an am.wikipedia.org link, or a question about
+a field. The optional DBpedia class is the **Class: auto** chip next to the
+send button. An infobox or link runs the extract → predict → format pipeline
+over SSE and ends in a mapping card; a field question runs a grounded
+lookup.
 
-The Review Queue (`/review`) is where a reviewer actually corrects the
-mapping agent's predictions, not just accepts or rejects them blindly:
+## Editing and publishing
 
-- Expand any queued item to edit its mappings directly — `templateProperty`,
-  `ontologyProperty`, and add/remove rows entirely
-  (`src/lib/components/MappingEditor.svelte`). An edited row is diff
-  -highlighted against the model's original prediction, with a one-click
-  reset back to it.
-- Each row has a **suggest** panel that calls the same
-  `find_semantic_match` retrieval endpoint the chat uses, so a correction
-  is picked from real grounded candidates instead of freehand-typed (and
-  possibly misspelled) — consistent with the rest of this project's "never
-  let free text stand in for retrieval" stance.
-- A row a reviewer edits is treated as human-confirmed (`confidence` snaps
-  to 100%); the backend logs `was_correction: true` for it in the training
-  log whenever the final `ontologyProperty` differs from what the model
-  predicted, regardless of whether the item is later published.
-- Publishing is a separate, explicit opt-in (checkbox + a confirmation
-  dialog that lists exactly what will be written) layered on top of
-  approval — never implied by clicking Approve. A failed publish (e.g. no
-  MediaWiki credentials configured) is surfaced with the real server
-  message via `DecisionFailedError` (`src/lib/api.ts`), not treated like a
-  generic unreachable-backend error — the review decision itself still
-  lands even when the publish half fails.
+Each infobox result is one mapping card
+(`src/lib/components/MappingCard.svelte`), and every infobox field is a row
+of the same table:
+
+- The DBpedia property of every row is an editable box, with an ontology
+  search beside it (the same `find-semantic-match` endpoint), so a fix is
+  picked from real candidates instead of typed from memory.
+- Changes are marked against the model's prediction
+  (`src/lib/mapping-diff.ts`): edited rows have an amber bar and "edited
+  from X · undo", added rows a green bar, removed rows stay in the table
+  struck through with a restore button. AI-proposed rows are flagged
+  "check this". The status chip and the footer count the changes, and
+  **Undo all** puts the prediction back.
+- Fields the pipeline couldn't map are empty rows with the closest
+  suggestions; picking or typing a property adds them.
+- **Publish** opens a confirmation that lists exactly what will be written,
+  with each change shown before → after. A failed publish shows the real
+  server reason (`PublishFailedError`, `src/lib/api.ts`).
 
 ## Auth
 
@@ -89,8 +95,8 @@ actual generated output instead of fought into working non-interactively;
 `components.json` for adding more.
 
 App-specific composites live one level up in `src/lib/components/`
-(`AppSidebar`, `ModeToggle`, `StatusBadge`, `ConfidencePill`, `StepTracker`,
-`MappingEditor`) rather than copy-pasted per page.
+(`AppSidebar`, `ModeToggle`, `ConfidencePill`, `StepTracker`,
+`MappingCard`) rather than copy-pasted per page.
 
 ## Running it
 
@@ -102,8 +108,8 @@ pnpm run dev --open
 
 `pnpm run check` runs `svelte-check`; `pnpm run lint` / `pnpm run format`
 wrap prettier + eslint, both already configured by `sv create`. `pnpm run
-test` runs Vitest (`@testing-library/svelte` + jsdom) for actual component
--level reactivity tests -- `src/lib/chat-history.test.ts` mounts
-`AppSidebar.svelte` for real and drives the chat-history store to prove the
-sidebar's "Chats" list genuinely updates live, not just that the store
-functions run without throwing.
+test` runs Vitest (`@testing-library/svelte` + jsdom). The tests mount the
+real components: `chat-turn-mutation.test.ts` drives the chat from message
+to publish (editing, Undo all, remove and restore, unmapped fields, the
+class chip), and `chat-store.test.ts` covers the tab-only chat and the
+sidebar's Clear chat.

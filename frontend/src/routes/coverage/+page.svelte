@@ -17,8 +17,8 @@
 			console.error('Failed to load coverage stats:', err);
 			error =
 				err instanceof BackendUnavailableError
-					? 'cross-lingual is not reachable — check that the HTTP server (just run-http) is running.'
-					: `Unexpected error while loading coverage stats: ${err instanceof Error ? err.message : String(err)}`;
+					? 'cross-lingual አይገኝም — የHTTP አገልጋዩ (just run-http) መሮጡን ያረጋግጡ።'
+					: `የሽፋን መረጃውን ሲጫን ያልተጠበቀ ስህተት፦ ${err instanceof Error ? err.message : String(err)}`;
 		}
 	}
 
@@ -27,10 +27,9 @@
 
 <div class="mx-auto h-full max-w-5xl overflow-y-auto px-4 py-6 md:px-8 md:py-10">
 	<div class="mb-8">
-		<h1 class="text-2xl font-semibold tracking-tight">Extraction Coverage</h1>
+		<h1 class="text-2xl font-semibold tracking-tight">የማውጣት ሽፋን</h1>
 		<p class="mt-1 text-sm text-muted-foreground">
-			Of the infobox templates this pipeline has processed, how many have a mapping actually
-			published to the live wiki.
+			ይህ ሂደት ካስተናገዳቸው የመረጃ ሳጥን መለጠፊያዎች ውስጥ ስንቶቹ ዝምድናቸው በቀጥታ ዊኪው ላይ እንደታተመ ያሳያል።
 		</p>
 	</div>
 
@@ -51,19 +50,19 @@
 		<div class="grid grid-cols-3 gap-4">
 			<Card>
 				<CardHeader>
-					<CardDescription>Templates</CardDescription>
+					<CardDescription>መለጠፊያዎች</CardDescription>
 					<CardTitle class="text-2xl tabular-nums">{stats.totalTemplates}</CardTitle>
 				</CardHeader>
 			</Card>
 			<Card>
 				<CardHeader>
-					<CardDescription>Mapped</CardDescription>
+					<CardDescription>የተዛመዱ</CardDescription>
 					<CardTitle class="text-2xl tabular-nums">{stats.mappedTemplates}</CardTitle>
 				</CardHeader>
 			</Card>
 			<Card>
 				<CardHeader>
-					<CardDescription>Coverage</CardDescription>
+					<CardDescription>ሽፋን</CardDescription>
 					<CardTitle class="text-2xl tabular-nums">{stats.coveragePercent.toFixed(1)}%</CardTitle>
 				</CardHeader>
 			</Card>

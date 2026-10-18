@@ -8,6 +8,6 @@
 	);
 </script>
 
-<Badge {variant} class="tabular-nums" title="Retrieval confidence">
+<Badge {variant} class="tabular-nums" title="የፍለጋ እርግጠኝነት">
 	{Math.round(confidence * 100)}%
 </Badge>

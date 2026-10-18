@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Root error page. It renders inside +layout.svelte, so the sidebar
-	// (new chat, Coverage, chat history) stays available on a 404.
+	// (Clear chat, Chat, Coverage) stays available on a 404.
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -14,7 +14,7 @@
 </script>
 
 <svelte:head>
-	<title>{notFound ? 'Page not found' : 'Error'} · agentic-amdbpedia</title>
+	<title>{notFound ? 'ገጹ አልተገኘም' : 'ስህተት'} · agentic-amdbpedia</title>
 </svelte:head>
 
 <div class="flex h-full items-center justify-center overflow-y-auto px-4 py-10">
@@ -23,30 +23,30 @@
 			{page.status}
 		</p>
 		<h1 class="mt-3 text-2xl font-semibold tracking-tight">
-			{notFound ? 'Page not found' : 'Something went wrong'}
+			{notFound ? 'ገጹ አልተገኘም' : 'የሆነ ችግር ተፈጥሯል'}
 		</h1>
 		<p class="mt-2 text-sm text-muted-foreground">
 			{#if wasReviewQueue}
-				The Review Queue was removed. Mappings are now edited and published directly in the chat.
+				የግምገማ ወረፋው ተወግዷል። ዝምድናዎች አሁን በውይይቱ ውስጥ በቀጥታ ይታረማሉ፣ ይታተማሉም።
 			{:else if notFound}
-				<span class="font-mono break-all">{page.url.pathname}</span> doesn't exist.
+				<span class="font-mono break-all">{page.url.pathname}</span> የሚባል ገጽ የለም።
 			{:else}
-				{page.error?.message ?? 'An unexpected error occurred.'}
+				{page.error?.message ?? 'ያልተጠበቀ ስህተት ተፈጥሯል።'}
 			{/if}
 		</p>
 
 		<div class="mt-6 flex flex-wrap justify-center gap-2">
 			<Button href={resolve('/')} class="gap-2">
 				<Fa icon={faComments} class="size-3.5" />
-				Go to chat
+				ወደ ውይይቱ
 			</Button>
 			<Button href={resolve('/coverage')} variant="outline" class="gap-2">
 				<Fa icon={faChartSimple} class="size-3.5" />
-				Coverage
+				ሽፋን
 			</Button>
 			<Button variant="ghost" class="gap-2" onclick={() => history.back()}>
 				<Fa icon={faArrowLeft} class="size-3.5" />
-				Back
+				ተመለስ
 			</Button>
 		</div>
 	</div>

@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
 import ChatPage from '../routes/+page.svelte';
-import { sessions, active } from './chat.svelte';
+import { chat } from './chat.svelte';
 import * as api from './api';
 import type { AgentStep, MappingSyntax, PredictedMapping } from './types';
 
@@ -9,8 +9,7 @@ const GERD_URL = 'https://am.wikipedia.org/wiki/ታላቁ_የኢትዮጵያ_ሕ
 
 describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 	beforeEach(() => {
-		sessions.length = 0;
-		active.id = null;
+		chat.turns.length = 0;
 		// Groq routing/feedback are server calls; keep them local here.
 		vi.spyOn(api, 'understandInput').mockImplementation(async (text, cls) => ({
 			intent: api.looksLikeWikipediaUrl(text) ? 'url' : 'field',

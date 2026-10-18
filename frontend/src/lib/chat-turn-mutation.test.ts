@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import ChatPage from '../routes/+page.svelte';
-import { sessions, active } from './chat.svelte';
+import { chat } from './chat.svelte';
 import * as api from './api';
 import type { AgentStep, MappingSyntax, PredictedMapping } from './types';
 
@@ -63,8 +63,7 @@ const submitBridgeInfobox = () => send('{{Infobox bridge\n| ርዝመት = 1,700
 
 describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 	beforeEach(() => {
-		sessions.length = 0;
-		active.id = null;
+		chat.turns.length = 0;
 		vi.spyOn(api, 'understandInput').mockResolvedValue(plan());
 		vi.spyOn(api, 'summarizeResult').mockResolvedValue({
 			message: 'I mapped 1 field: `length`. Edit the table, then press Publish.',
@@ -88,8 +87,8 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		await waitFor(() => expect(screen.getByDisplayValue('length')).toBeInTheDocument());
 		await waitFor(() => {
 			expect(screen.getByText(/I mapped 1 field/)).toBeInTheDocument();
-			expect(screen.getByText('View mapping wikitext')).toBeInTheDocument();
-			expect(screen.getByText('View mapping XML')).toBeInTheDocument();
+			expect(screen.getByText('የማዛመጃ wikitext')).toBeInTheDocument();
+			expect(screen.getByText('የማዛመጃ XML')).toBeInTheDocument();
 			expect(
 				screen.getByText(/Skipped 3 field\(s\) already present in the published Amharic mappings/)
 			).toBeInTheDocument();
@@ -110,7 +109,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
 		expect(screen.queryByText(/review queue/i)).not.toBeInTheDocument();
-		expect(screen.getByRole('button', { name: /publish 1 mapping/i })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /publish · 1/i })).toBeInTheDocument();
 	});
 
 	it('publishes the edited table only after the confirmation dialog', async () => {
@@ -127,7 +126,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		// Edit right in the chat.
 		await fireEvent.input(cell, { target: { value: 'totalLength' } });
 
-		screen.getByRole('button', { name: /publish 1 mapping/i }).click();
+		screen.getByRole('button', { name: /publish · 1/i }).click();
 		expect(publishSpy).not.toHaveBeenCalled();
 
 		(await screen.findByRole('button', { name: /^publish$/i })).click();
@@ -143,8 +142,9 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 			});
 		});
 		await waitFor(() => {
-			expect(screen.getByText('Mapping am:Infobox bridge')).toBeInTheDocument();
-			expect(screen.queryByRole('button', { name: /publish 1 mapping/i })).not.toBeInTheDocument();
+			expect(screen.getByRole('link', { name: 'Mapping am:Infobox bridge' })).toBeInTheDocument();
+			expect(screen.getByText('ታትሟል')).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: /publish · 1/i })).not.toBeInTheDocument();
 		});
 	});
 
@@ -159,7 +159,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 
 		await submitBridgeInfobox();
 		await screen.findByDisplayValue('length');
-		screen.getByRole('button', { name: /publish 1 mapping/i }).click();
+		screen.getByRole('button', { name: /publish · 1/i }).click();
 		(await screen.findByRole('button', { name: /^publish$/i })).click();
 
 		await waitFor(() => {
@@ -180,17 +180,20 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		});
 
 		await submitBridgeInfobox();
-		await screen.findByText(/couldn't be mapped automatically/i);
-		screen.getByRole('button', { name: /^search$/i }).click();
-		await waitFor(() => expect(findSpy).toHaveBeenCalled());
+		// The unmapped field is a row of the same table, not a separate box.
+		const empty = await screen.findByLabelText('DBpedia ባህርይ ለካርታ_መግለጫ');
+		expect(empty).toHaveValue('');
+		screen.getByRole('button', { name: 'ለካርታ_መግለጫ ኦንቶሎጂውን ፈልግ' }).click();
+		await waitFor(() => expect(findSpy).toHaveBeenCalledWith('ካርታ_መግለጫ', 'Bridge'));
 
 		(await screen.findByRole('button', { name: /depiction/i })).click();
 		await waitFor(() => {
-			expect(screen.getByDisplayValue('depiction')).toBeInTheDocument();
-			expect(screen.queryByText(/couldn't be mapped automatically/i)).not.toBeInTheDocument();
+			expect(screen.getByLabelText('DBpedia ባህርይ ለካርታ_መግለጫ')).toHaveValue('depiction');
+			expect(screen.getByText('በእርስዎ የተጨመረ')).toBeInTheDocument();
+			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተጨምሯል');
 		});
 
-		screen.getByRole('button', { name: /publish 2 mappings/i }).click();
+		screen.getByRole('button', { name: /publish · 2/i }).click();
 		(await screen.findByRole('button', { name: /^publish$/i })).click();
 		await waitFor(() => {
 			expect(publishSpy).toHaveBeenCalledWith(
@@ -225,7 +228,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		expect(previewSpy).not.toHaveBeenCalled();
 		await waitFor(() => {
 			expect(screen.getByText('ዋና_አዘጋጅ', { selector: 'span' })).toBeInTheDocument();
-			expect(screen.getByText('AI-proposed')).toBeInTheDocument();
+			expect(screen.getByText('በAI የተጠቆመ')).toBeInTheDocument();
 		});
 		expect(api.summarizeResult).toHaveBeenCalledWith(
 			'field',
@@ -248,5 +251,67 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		);
 		expect(findSpy).not.toHaveBeenCalled();
 		expect(previewSpy).not.toHaveBeenCalled();
+	});
+
+	it('marks an edited property and Undo all puts the prediction back', async () => {
+		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
+
+		await submitBridgeInfobox();
+		const cell = await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		expect(screen.getByTestId('card-status')).toHaveTextContent(/^ረቂቅ$/);
+		expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
+
+		await fireEvent.input(cell, { target: { value: 'totalLength' } });
+
+		await waitFor(() => {
+			expect(screen.getByText(/የቀድሞው፦/)).toBeInTheDocument();
+			expect(cell.closest('tr')).toHaveAttribute('data-change', 'edited');
+			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ታርሟል');
+			expect(screen.getByText('1 ለውጦች')).toBeInTheDocument();
+		});
+
+		screen.getByRole('button', { name: 'ሁሉንም መልስ' }).click();
+		await waitFor(() => {
+			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
+			expect(screen.queryByText(/የቀድሞው፦/)).not.toBeInTheDocument();
+			expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
+		});
+	});
+
+	it('keeps a removed row in the table, struck through, until it is restored', async () => {
+		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
+
+		await submitBridgeInfobox();
+		await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+
+		screen.getByRole('button', { name: 'ርዝመት አስወግድ' }).click();
+		await waitFor(() => {
+			expect(screen.getByText('ተወግዷል፣ አይታተምም')).toBeInTheDocument();
+			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተወግዷል');
+			expect(screen.getByRole('button', { name: /publish · 0/i })).toBeDisabled();
+		});
+
+		screen.getByRole('button', { name: 'ርዝመት ወደነበረበት መልስ' }).click();
+		await waitFor(() => {
+			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
+			expect(screen.getByRole('button', { name: /publish · 1/i })).toBeEnabled();
+		});
+	});
+
+	it('sends the class chip value with the message', async () => {
+		const understandSpy = vi.spyOn(api, 'understandInput');
+		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
+		render(ChatPage);
+
+		screen.getByRole('button', { name: /ክፍል፦ ራስ-ሰር/ }).click();
+		const classInput = await screen.findByLabelText('ዒላማ ክፍል');
+		await fireEvent.input(classInput, { target: { value: 'Bridge' } });
+		await fireEvent.keyDown(classInput, { key: 'Enter' });
+		expect(await screen.findByRole('button', { name: /ክፍል፦ Bridge/ })).toBeInTheDocument();
+
+		const textarea = screen.getByPlaceholderText(/የመረጃ ሳጥን/);
+		await fireEvent.input(textarea, { target: { value: '{{Infobox bridge}}' } });
+		screen.getByRole('button', { name: 'ላክ' }).click();
+		await waitFor(() => expect(understandSpy).toHaveBeenCalledWith('{{Infobox bridge}}', 'Bridge'));
 	});
 });

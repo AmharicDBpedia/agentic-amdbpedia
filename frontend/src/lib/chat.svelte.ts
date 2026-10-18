@@ -1,10 +1,9 @@
-// Chat history, persisted client-side. There's no backend "conversations"
-// table to back this with, so this is deliberately
-// localStorage-only: per-browser, not shared across devices or reviewers.
-// Good enough for "the thread I was just looking at is still there after I
-// navigate away and back" without inventing backend storage this app
-// doesn't otherwise need.
+// The one conversation on screen. There are no user accounts, so there is
+// no chat history: the conversation lives in this browser tab only
+// (sessionStorage), surviving a reload so unpublished edits aren't lost,
+// and is gone when the tab closes or the user presses "Clear chat".
 import { browser } from '$app/environment';
+import { changesFor } from './mapping-diff';
 import type { AgentStep, MappingCandidate, PredictedMapping, UnmappedField } from './types';
 
 /** Groq's final reply for a turn (`POST /v1/assist/summarize`). */
@@ -29,16 +28,16 @@ export interface PipelineTurn {
 	// What a publish writes: `Mapping am:<templateName>` mapped to `domainClass`.
 	templateName?: string | null;
 	domainClass?: string;
-	// The editable copy shown in the chat table (starts as `mappings`).
+	// The editable copy shown in the mapping card (starts as `mappings`).
 	// Publishing sends exactly these rows.
 	edited?: PredictedMapping[];
 	// Pipeline notes: fields skipped as already-published, fields with no
 	// confident match, which model answered, an auto-derived class.
 	warnings?: string[];
-	// Fields the pipeline couldn't map; each can be assigned from the chat.
+	// Fields the pipeline couldn't map. Never shrinks: a field counts as
+	// still unmapped while no row in `edited` maps it, so "Undo all" brings
+	// it back.
 	unmappedFields?: UnmappedField[];
-	// Older saved chats kept hand-assigned rows here; folded into `edited`.
-	manualMappings?: PredictedMapping[];
 	feedback?: TurnFeedback | null;
 	publishing?: boolean;
 	publishError?: string;
@@ -68,116 +67,70 @@ export interface AnswerTurn {
 
 export type Turn = PipelineTurn | AnswerTurn;
 
-export interface ChatSession {
-	id: string;
-	title: string;
-	turns: Turn[];
-	updatedAt: number;
-}
+const STORAGE_KEY = 'amdbpedia:chat:v2';
+// The old multi-chat history (one entry per saved chat). Removed on load.
+const LEGACY_HISTORY_KEY = 'amdbpedia:chat-sessions:v1';
 
-const STORAGE_KEY = 'amdbpedia:chat-sessions:v1';
-const MAX_SESSIONS = 50;
-
-// Chats saved before in-chat editing have no `edited` rows. Filling them in
-// here, not while rendering, because Svelte forbids writing state from a
-// template expression (state_unsafe_mutation).
-export function withEditedRows(loaded: ChatSession[]): ChatSession[] {
-	for (const session of loaded) {
-		for (const turn of session.turns ?? []) {
-			if (turn.kind !== 'pipeline' || turn.edited || !turn.mappings) continue;
-			turn.edited = [...turn.mappings, ...(turn.manualMappings ?? [])].map((row) => ({ ...row }));
-		}
+// A turn still running when the tab reloaded will never finish: its
+// request died with the old page.
+export function settleInterrupted(turns: Turn[]): Turn[] {
+	for (const turn of turns) {
+		if (turn.kind === 'pipeline') turn.publishing = false;
+		if (!turn.running) continue;
+		turn.running = false;
+		turn.error ??= 'ገጹ እንደገና ስለተጫነ ተቋርጧል። እንደገና ለማስኬድ መልእክቱን ደግመው ይላኩ።';
 	}
-	return loaded;
+	return turns;
 }
 
-function loadSessions(): ChatSession[] {
+export function loadTurns(): Turn[] {
 	if (!browser) return [];
 	try {
-		const raw = localStorage.getItem(STORAGE_KEY);
-		if (!raw) return [];
-		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? withEditedRows(parsed) : [];
+		localStorage.removeItem(LEGACY_HISTORY_KEY);
+	} catch {
+		// Disabled site data: nothing to clean up anyway.
+	}
+	try {
+		const raw = sessionStorage.getItem(STORAGE_KEY);
+		const parsed = raw ? JSON.parse(raw) : [];
+		return Array.isArray(parsed) ? settleInterrupted(parsed) : [];
 	} catch (err) {
-		console.error('Failed to load chat history from localStorage:', err);
+		console.error('Failed to load the chat from sessionStorage:', err);
 		return [];
 	}
 }
 
-export const sessions = $state<ChatSession[]>(loadSessions());
-export const active = $state<{ id: string | null }>({ id: sessions[0]?.id ?? null });
+export const chat = $state<{ turns: Turn[] }>({ turns: loadTurns() });
 
-function persist() {
+export function saveChat(turns: Turn[] = $state.snapshot(chat.turns)) {
 	if (!browser) return;
 	try {
-		localStorage.setItem(STORAGE_KEY, JSON.stringify($state.snapshot(sessions)));
+		sessionStorage.setItem(STORAGE_KEY, JSON.stringify(turns));
 	} catch (err) {
-		// Private browsing / storage quota / disabled site data -- a chat
-		// still works for the session, it just won't survive a reload.
-		console.error('Failed to persist chat history to localStorage:', err);
+		// Private browsing / storage quota -- the chat still works, it just
+		// won't survive a reload.
+		console.error('Failed to save the chat to sessionStorage:', err);
 	}
 }
 
-export function deriveTitle(text: string): string {
-	const oneLine = text.replace(/\s+/g, ' ').trim();
-	if (!oneLine) return 'New chat';
-	return oneLine.length > 48 ? oneLine.slice(0, 48) + '…' : oneLine;
-}
-
-export function newSession(): string {
-	const id = crypto.randomUUID();
-	sessions.unshift({ id, title: 'New chat', turns: [], updatedAt: Date.now() });
-	if (sessions.length > MAX_SESSIONS) sessions.length = MAX_SESSIONS;
-	active.id = id;
-	persist();
-	return id;
-}
-
-export function ensureActiveSession(): ChatSession {
-	const existing = sessions.find((s) => s.id === active.id);
-	if (existing) return existing;
-	newSession();
-	return sessions[0];
-}
-
-export function currentSession(): ChatSession | undefined {
-	return sessions.find((s) => s.id === active.id);
-}
-
-export function selectSession(id: string) {
-	active.id = id;
-}
-
-/** Used by the sidebar's "New chat" button: only actually creates a new
- * (empty) session if the current one already has content, so repeated
- * clicks don't pile up empty "New chat" placeholders in the history. */
-export function startNewChat(): string {
-	const existing = currentSession();
-	if (!existing || existing.turns.length > 0) return newSession();
-	return existing.id;
-}
-
-export function touchSession(id: string) {
-	const index = sessions.findIndex((s) => s.id === id);
-	if (index === -1) return;
-	const session = sessions[index];
-	session.updatedAt = Date.now();
-	if (session.title === 'New chat' && session.turns.length > 0) {
-		session.title = deriveTitle(session.turns[0].input);
+export function clearChat() {
+	chat.turns.length = 0;
+	if (!browser) return;
+	try {
+		sessionStorage.removeItem(STORAGE_KEY);
+	} catch {
+		// Nothing stored, nothing to clear.
 	}
-	// Most-recently-touched floats to the top, matching every chat product's
-	// history ordering.
-	if (index > 0) {
-		sessions.splice(index, 1);
-		sessions.unshift(session);
-	}
-	persist();
 }
 
-export function deleteSession(id: string) {
-	const index = sessions.findIndex((s) => s.id === id);
-	if (index === -1) return;
-	sessions.splice(index, 1);
-	if (active.id === id) active.id = sessions[0]?.id ?? null;
-	persist();
+/** True when some mapping card has changes nobody has published yet. */
+export function hasUnpublishedEdits(turns: Turn[] = chat.turns): boolean {
+	return turns.some(
+		(turn) =>
+			turn.kind === 'pipeline' &&
+			!turn.published &&
+			turn.mappings !== null &&
+			turn.edited !== undefined &&
+			changesFor(turn.mappings, turn.edited).total > 0
+	);
 }

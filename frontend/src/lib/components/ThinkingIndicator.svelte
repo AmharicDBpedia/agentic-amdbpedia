@@ -1,5 +1,5 @@
 <script lang="ts">
-	let { label = 'Thinking' }: { label?: string } = $props();
+	let { label = 'በማሰብ ላይ' }: { label?: string } = $props();
 </script>
 
 <div class="flex items-center gap-2 text-sm text-muted-foreground">

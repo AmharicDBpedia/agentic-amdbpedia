@@ -1,5 +1,9 @@
 # Changelog
 
+- `feat(ui): Amharic for every remaining UI string (mapping card, sidebar, class chip, publish and clear dialogs, Coverage, 404); sidebar link to the usage guide (static/documentation.html)`
+- `feat(ui): one chat per tab with no history (sessionStorage, Clear chat asks before dropping unpublished edits); class picker moved into the message box as a chip`
+- `feat(ui): mapping card with every field in one table; edited, added, removed and AI-proposed rows marked, change count, Undo all, before → after list in the publish dialog`
+
 - `feat(ui): 404 page inside the app layout (sidebar kept); old /review links explain the Review Queue was removed`
 - `test(eval): round 4, 16 new infoboxes (104 fields) with gemma2:9b vs Groq, hand-graded; runner saves after each infobox and writes a Markdown report (evaluation/novel_inputs/round4_report.md)`
 
