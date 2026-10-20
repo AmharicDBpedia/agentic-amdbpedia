@@ -20,8 +20,7 @@
 		faPlus,
 		faRotateLeft,
 		faSpinner,
-		faTrash,
-		faXmark
+		faTrash
 	} from '@fortawesome/free-solid-svg-icons';
 
 	let { turn }: { turn: PipelineTurn } = $props();
@@ -77,18 +76,19 @@
 		row.ack = 'confirmed';
 	}
 
-	// ✗ acknowledges that the prediction is wrong and reveals the fix
-	// controls (search, delete). The property stays until the user acts;
-	// clearing it before they picked a replacement would strand the field.
-	function rejectRow(row: PredictedMapping) {
-		row.ack = 'rejected';
-		openSearch = row.templateProperty;
-		if (openSearch) {
-			searchQuery = row.templateProperty;
-			searchResults = null;
-			searchError = null;
-			runSearch();
-		}
+	// Rows are read-only until the pencil opens edit mode for one row at a
+	// time; the tick closes it (and confirms the pick). The search panel is
+	// only reachable while a row is being edited.
+	let editing = $state<string | null>(null);
+
+	function startEdit(row: PredictedMapping) {
+		editing = row.templateProperty;
+	}
+
+	function stopEdit(row: PredictedMapping) {
+		if (editing === row.templateProperty) editing = null;
+		openSearch = null;
+		confirmRow(row);
 	}
 
 	function restoreRow(row: PredictedMapping) {
@@ -314,8 +314,7 @@
 				{#each rows as row, i (i)}
 					{@const change = rowChange(original, row)}
 					{@const aiPick = row.source === 'llm' && change === null}
-					{@const showFixTools =
-						change !== null || row.ack === 'rejected' || row.ack === 'confirmed'}
+					{@const isEditing = editing === row.templateProperty && !readonly}
 					<tr
 						class={cn(
 							'border-b border-l-4 align-top last:border-b-0',
@@ -327,7 +326,7 @@
 					>
 						<td class="px-3 py-2.5 sm:px-4">{@render fieldCell(row.templateProperty)}</td>
 						<td class="px-3 py-2.5 sm:px-4">
-							{#if readonly}
+							{#if !isEditing}
 								<span class="font-mono">{row.ontologyProperty}</span>
 							{:else}
 								<div class="flex items-center gap-1.5">
@@ -347,9 +346,7 @@
 											class="pointer-events-none absolute top-1/2 right-2.5 size-2.5 -translate-y-1/2 text-muted-foreground/60"
 										/>
 									</div>
-									{#if showFixTools}
-										{@render searchButton(row.templateProperty)}
-									{/if}
+									{@render searchButton(row.templateProperty)}
 								</div>
 							{/if}
 							<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -389,13 +386,36 @@
 									<ConfidencePill confidence={row.confidence} />
 								{/if}
 							</div>
-							{#if openSearch === row.templateProperty && !readonly && showFixTools}
+							{#if openSearch === row.templateProperty && isEditing}
 								{@render searchPanel(row.templateProperty)}
 							{/if}
 						</td>
 						{#if !readonly}
 							<td class="px-2 py-2.5">
-								{#if showFixTools}
+								<div class="flex items-center gap-1">
+									{#if isEditing}
+										<Button
+											variant="ghost"
+											size="icon"
+											class="size-8 text-muted-foreground hover:text-success"
+											onclick={() => stopEdit(row)}
+											title="አርትዖትን ጨርስ"
+											aria-label="{row.templateProperty} አርትዖትን ጨርስ"
+										>
+											<Fa icon={faCheck} class="size-3.5" />
+										</Button>
+									{:else}
+										<Button
+											variant="ghost"
+											size="icon"
+											class="size-8 text-muted-foreground hover:text-foreground"
+											onclick={() => startEdit(row)}
+											title="አርትዕ"
+											aria-label="{row.templateProperty} አርትዕ"
+										>
+											<Fa icon={faPen} class="size-3.5" />
+										</Button>
+									{/if}
 									<Button
 										variant="ghost"
 										size="icon"
@@ -406,30 +426,7 @@
 									>
 										<Fa icon={faTrash} class="size-3.5" />
 									</Button>
-								{:else}
-									<div class="flex items-center gap-1">
-										<Button
-											variant="ghost"
-											size="icon"
-											class="size-8 text-muted-foreground hover:text-success"
-											onclick={() => confirmRow(row)}
-											title="ትክክል ነው"
-											aria-label="{row.templateProperty} ተረጋግጧል"
-										>
-											<Fa icon={faCheck} class="size-3.5" />
-										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											class="size-8 text-muted-foreground hover:text-destructive"
-											onclick={() => rejectRow(row)}
-											title="ትክክል አይደለም"
-											aria-label="{row.templateProperty} ትክክል አይደለም"
-										>
-											<Fa icon={faXmark} class="size-3.5" />
-										</Button>
-									</div>
-								{/if}
+								</div>
 							</td>
 						{/if}
 					</tr>
@@ -531,11 +528,6 @@
 						class="underline underline-offset-2 hover:text-foreground"
 						onclick={undoAll}>ሁሉንም መልስ</button
 					>
-				{:else}
-					<span>እስካሁን ምንም ለውጥ የለም</span>
-				{/if}
-				{#if unmapped.length > 0}
-					· {unmapped.length} መስኮች አልተዛመዱም
 				{/if}
 			</div>
 			<div class="flex flex-col items-end gap-0.5">

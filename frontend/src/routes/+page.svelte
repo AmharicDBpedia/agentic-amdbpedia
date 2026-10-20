@@ -250,29 +250,6 @@
 							{:else if turn.mappings}
 								<p class="text-sm text-muted-foreground">ከዚህ የመረጃ ሳጥን በእርግጠኝነት የተዛመደ ባህርይ የለም።</p>
 							{/if}
-							{#if turn.mappings && (turn.mappingWikitext || turn.xmlRules)}
-								<details class="rounded-lg border text-sm">
-									<summary
-										class="cursor-pointer px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
-									>
-										ተጨማሪ፦ የተመነጨው wikitext እና XML (በሞዴሉ የተተነበየው፣ ከእርማትዎ በፊት)
-									</summary>
-									{#if turn.mappingWikitext}
-										<p class="border-t px-3 pt-2 text-xs font-medium text-muted-foreground">
-											የማዛመጃ wikitext
-										</p>
-										<pre
-											class="overflow-x-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap">{turn.mappingWikitext}</pre>
-									{/if}
-									{#if turn.xmlRules}
-										<p class="border-t px-3 pt-2 text-xs font-medium text-muted-foreground">
-											የማዛመጃ XML
-										</p>
-										<pre
-											class="overflow-x-auto px-3 py-2 font-mono text-xs whitespace-pre-wrap">{turn.xmlRules}</pre>
-									{/if}
-								</details>
-							{/if}
 						{:else if turn.kind === 'answer'}
 							{#if turn.field}
 								<p class="text-xs text-muted-foreground">

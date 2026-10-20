@@ -53,8 +53,8 @@
 		{ href: resolve('/'), label: 'ውይይት', icon: faComments, page: false },
 		{ href: resolve('/coverage'), label: 'ሽፋን', icon: faChartSimple, page: false },
 		// The static usage guide (static/documentation.html), not an app
-		// route: it needs a full page load, or the router shows the 404 page.
-		{ href: asset('/documentation.html'), label: 'የአጠቃቀም መመሪያ', icon: faBook, page: true }
+		// route: opens in a new tab so the chat stays put.
+		{ href: asset('/documentation.html'), label: 'የአጠቃቀም መመሪያ', icon: faBook, page: true, newTab: true }
 	];
 
 	// Clearing drops edits nobody published, so that case asks first.
@@ -133,6 +133,8 @@
 			<a
 				href={link.href}
 				data-sveltekit-reload={link.page || undefined}
+				target={link.newTab ? '_blank' : undefined}
+				rel={link.newTab ? 'noreferrer' : undefined}
 				onclick={() => (open = false)}
 				title={link.label}
 				class={cn(
@@ -153,11 +155,6 @@
 	</nav>
 
 	<div class="flex-1"></div>
-	{#if !collapsed}
-		<p class="px-4 pb-4 text-xs leading-relaxed text-sidebar-foreground/45">
-			ውይይቱ በዚህ ትር ውስጥ ብቻ ይቀመጣል። ትሩን ሲዘጉ ወይም ሲያጸዱት ይጠፋል፤ የታተመው ግን ዊኪው ላይ ይቆያል።
-		</p>
-	{/if}
 </aside>
 
 <AlertDialog.Root bind:open={confirmClear}>
