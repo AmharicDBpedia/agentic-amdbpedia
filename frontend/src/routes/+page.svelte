@@ -93,18 +93,8 @@
 					}
 					scrollToBottom();
 				}
-				// 3. Groq turns the result into the final reply.
-				if (turn.mappings) {
-					turn.feedback = await summarizeResult(
-						'infobox',
-						{
-							domainClass: turn.domainClass,
-							mappings: turn.mappings,
-							unmappedFields: turn.unmappedFields
-						},
-						'am'
-					);
-				}
+				// A Groq summary of the mapping would just repeat what the card
+				// already shows (edits, AI-proposed, unmapped), so skip it.
 			} catch (err) {
 				console.error('Mapping pipeline failed:', err);
 				turn.error =
@@ -247,22 +237,10 @@
 								/>
 							{/if}
 							<StepTracker steps={turn.steps} finished={!turn.running} />
-							{#if turn.feedback}
-								{@render feedbackBubble(turn.feedback.message)}
-							{/if}
 							{#if turn.mappings && turn.edited && (turn.mappings.length > 0 || turn.edited.length > 0 || (turn.unmappedFields?.length ?? 0) > 0)}
 								<MappingCard {turn} />
 							{:else if turn.mappings}
 								<p class="text-sm text-muted-foreground">ከዚህ የመረጃ ሳጥን በእርግጠኝነት የተዛመደ ባህርይ የለም።</p>
-							{/if}
-							{#if turn.mappings && turn.warnings && turn.warnings.length > 0}
-								<ul class="space-y-1 text-xs text-muted-foreground">
-									{#each turn.warnings as note (note)}
-										<li class="flex gap-1.5">
-											<span aria-hidden="true">·</span><span>{note}</span>
-										</li>
-									{/each}
-								</ul>
 							{/if}
 							{#if turn.mappings && (turn.mappingWikitext || turn.xmlRules)}
 								<details class="rounded-lg border text-sm">

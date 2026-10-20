@@ -18,6 +18,7 @@
 	import Fa from 'svelte-fa';
 	import { toast } from 'svelte-sonner';
 	import {
+		faCheck,
 		faCircleCheck,
 		faCloudUploadAlt,
 		faMagnifyingGlass,
@@ -25,7 +26,8 @@
 		faPlus,
 		faRotateLeft,
 		faSpinner,
-		faTrash
+		faTrash,
+		faXmark
 	} from '@fortawesome/free-solid-svg-icons';
 
 	let { turn }: { turn: PipelineTurn } = $props();
@@ -72,6 +74,24 @@
 
 	function removeRow(row: PredictedMapping) {
 		turn.edited = rows.filter((r) => r !== row);
+	}
+
+	function confirmRow(row: PredictedMapping) {
+		row.ack = 'confirmed';
+	}
+
+	// ✗ acknowledges that the prediction is wrong and reveals the fix
+	// controls (search, delete). The property stays until the user acts;
+	// clearing it before they picked a replacement would strand the field.
+	function rejectRow(row: PredictedMapping) {
+		row.ack = 'rejected';
+		openSearch = row.templateProperty;
+		if (openSearch) {
+			searchQuery = row.templateProperty;
+			searchResults = null;
+			searchError = null;
+			runSearch();
+		}
 	}
 
 	function restoreRow(row: PredictedMapping) {
@@ -316,6 +336,8 @@
 				{#each rows as row, i (i)}
 					{@const change = rowChange(original, row)}
 					{@const aiPick = row.source === 'llm' && change === null}
+					{@const showFixTools =
+						change !== null || row.ack === 'rejected' || row.ack === 'confirmed'}
 					<tr
 						class={cn(
 							'border-b border-l-4 align-top last:border-b-0',
@@ -339,7 +361,7 @@
 											class={cn(
 												'h-8 pr-7 font-mono',
 												change === 'edited' && 'border-warning focus-visible:ring-warning/40',
-												aiPick && 'border-dashed border-warning'
+												aiPick && row.ack !== 'confirmed' && 'border-dashed border-warning'
 											)}
 										/>
 										<Fa
@@ -347,7 +369,9 @@
 											class="pointer-events-none absolute top-1/2 right-2.5 size-2.5 -translate-y-1/2 text-muted-foreground/60"
 										/>
 									</div>
-									{@render searchButton(row.templateProperty)}
+									{#if showFixTools}
+										{@render searchButton(row.templateProperty)}
+									{/if}
 								</div>
 							{/if}
 							<div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -368,10 +392,15 @@
 								{:else if change === 'added'}
 									<span class="text-success">በእርስዎ የተጨመረ</span>
 								{:else}
-									{#if aiPick}
+									{#if row.ack === 'confirmed'}
+										<span class="flex items-center gap-1 text-success">
+											<Fa icon={faCheck} class="size-3" />
+											ተረጋግጧል
+										</span>
+									{:else if aiPick}
 										<span
 											class="rounded bg-warning/15 px-1 py-0.5 font-medium text-warning-foreground dark:text-warning"
-											title="ፍለጋው እርግጠኛ ውጤት ስላላገኘ በቋንቋ ሞዴሉ የተመረጠ።">በAI የተጠቆመ · ያረጋግጡ</span
+											title="ፍለጋው እርግጠኛ ውጤት ስላላገኘ ተመረጠ።">recommended</span
 										>
 									{:else if row.source === 'learned'}
 										<span
@@ -382,22 +411,47 @@
 									<ConfidencePill confidence={row.confidence} />
 								{/if}
 							</div>
-							{#if openSearch === row.templateProperty && !readonly}
+							{#if openSearch === row.templateProperty && !readonly && showFixTools}
 								{@render searchPanel(row.templateProperty)}
 							{/if}
 						</td>
 						{#if !readonly}
 							<td class="px-2 py-2.5">
-								<Button
-									variant="ghost"
-									size="icon"
-									class="size-8 text-muted-foreground hover:text-destructive"
-									onclick={() => removeRow(row)}
-									title="ይህን መስክ አስወግድ"
-									aria-label="{row.templateProperty} አስወግድ"
-								>
-									<Fa icon={faTrash} class="size-3.5" />
-								</Button>
+								{#if showFixTools}
+									<Button
+										variant="ghost"
+										size="icon"
+										class="size-8 text-muted-foreground hover:text-destructive"
+										onclick={() => removeRow(row)}
+										title="ይህን መስክ አስወግድ"
+										aria-label="{row.templateProperty} አስወግድ"
+									>
+										<Fa icon={faTrash} class="size-3.5" />
+									</Button>
+								{:else}
+									<div class="flex items-center gap-1">
+										<Button
+											variant="ghost"
+											size="icon"
+											class="size-8 text-muted-foreground hover:text-success"
+											onclick={() => confirmRow(row)}
+											title="ትክክል ነው"
+											aria-label="{row.templateProperty} ተረጋግጧል"
+										>
+											<Fa icon={faCheck} class="size-3.5" />
+										</Button>
+										<Button
+											variant="ghost"
+											size="icon"
+											class="size-8 text-muted-foreground hover:text-destructive"
+											onclick={() => rejectRow(row)}
+											title="ትክክል አይደለም"
+											aria-label="{row.templateProperty} ትክክል አይደለም"
+										>
+											<Fa icon={faXmark} class="size-3.5" />
+										</Button>
+									</div>
+								{/if}
 							</td>
 						{/if}
 					</tr>

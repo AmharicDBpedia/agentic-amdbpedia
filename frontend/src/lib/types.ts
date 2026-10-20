@@ -23,6 +23,11 @@ export interface PredictedMapping {
 	// `manual` (a reviewer assigned it by hand from the chat). Absent on
 	// older backends — treat undefined as `retrieval`.
 	source?: 'retrieval' | 'llm' | 'learned' | 'manual';
+	// What the reviewer did with this prediction in the chat: `confirmed`
+	// (clicked ✓), `rejected` (clicked ✗ and should fix it). Undefined
+	// means "not yet acknowledged". Not sent on publish — the backend
+	// doesn't care; this is only to drive the actions column.
+	ack?: 'confirmed' | 'rejected';
 }
 
 /** A field neither retrieval nor the LLM fallback could map, carried on

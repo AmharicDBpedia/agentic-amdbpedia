@@ -1,5 +1,7 @@
 # Changelog
 
+- `feat(ui): confirm/reject (✓/✗) step on every predicted row before the search and delete controls appear; the AI-proposed badge becomes (recommended)`
+- `feat(ui): the pipeline response is now only the mapping card -- the Groq summary bubble and the warnings list are gone`
 - `docs: README updated for the Amharic single-chat UI; architecture diagram as an editable Excalidraw scene (docs/architecture.excalidraw, exported to docs/architecture.svg)`
 - `fix(ui): typing a row's predicted property back in keeps its confidence instead of jumping to 100%`
 - `feat(ui): Amharic for every remaining UI string (mapping card, sidebar, class chip, publish and clear dialogs, Coverage, 404); sidebar link to the usage guide (static/documentation.html)`
