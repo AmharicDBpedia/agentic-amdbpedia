@@ -16,12 +16,23 @@
 	import ThinkingIndicator from '$lib/components/ThinkingIndicator.svelte';
 	import logo from '$lib/assets/dbpedia-am-logo.png';
 	import Fa from 'svelte-fa';
-	import { faArrowUp, faXmark } from '@fortawesome/free-solid-svg-icons';
+	import { faArrowUp } from '@fortawesome/free-solid-svg-icons';
 
 	let input = $state('');
-	let targetClass = $state('');
-	let editingClass = $state(false);
 	let busy = $state(false);
+
+	// Pasted Wikipedia URLs arrive percent-encoded (am.wikipedia.org wraps
+	// every Amharic character as %XX). Showing them raw in the message
+	// bubble looks like noise, so decode for display -- the string the
+	// backend fetched is still the one in `turn.input`.
+	function displayInput(text: string): string {
+		if (!looksLikeWikipediaUrl(text)) return text;
+		try {
+			return decodeURI(text);
+		} catch {
+			return text;
+		}
+	}
 	// The message Groq is reading right now (before we know its turn kind).
 	let understanding = $state<string | null>(null);
 	let scrollAnchor: HTMLDivElement | undefined = $state();
@@ -51,15 +62,14 @@
 		busy = true;
 
 		const id = crypto.randomUUID();
-		const wantsClass = targetClass.trim() || undefined;
 
 		// 1. Groq reads the message: infobox, link, or a field (possibly
 		//    inside a question), and which DBpedia class it belongs to.
 		understanding = value;
 		scrollToBottom();
-		const plan = await understandInput(value, wantsClass);
+		const plan = await understandInput(value);
 		understanding = null;
-		const cls = plan.target_class ?? wantsClass;
+		const cls = plan.target_class ?? undefined;
 
 		if (plan.intent === 'url' || plan.intent === 'infobox') {
 			chat.turns.push({
@@ -159,10 +169,6 @@
 		}
 	}
 
-	function focusOnMount(node: HTMLInputElement) {
-		node.focus();
-	}
-
 	const examples = [
 		{
 			label: 'የመረጃ ሳጥን ለማዛመድ ይለጥፉ',
@@ -218,7 +224,9 @@
 					<div class="flex justify-end">
 						<div class="max-w-[85%]">
 							<pre
-								class="max-h-60 overflow-y-auto rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground">{turn.input}</pre>
+								class="max-h-60 overflow-y-auto rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground">{displayInput(
+									turn.input
+								)}</pre>
 							{#if turn.targetClass}
 								<p class="mt-1 pr-1 text-right text-xs text-muted-foreground">
 									ክፍል፦ {turn.targetClass}
@@ -345,7 +353,9 @@
 			<div class="mt-6 flex flex-col gap-3">
 				<div class="flex justify-end">
 					<pre
-						class="max-h-60 max-w-[85%] overflow-y-auto rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground">{understanding}</pre>
+						class="max-h-60 max-w-[85%] overflow-y-auto rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm whitespace-pre-wrap text-primary-foreground">{displayInput(
+							understanding
+						)}</pre>
 				</div>
 				<ThinkingIndicator label="መልእክትዎን በማንበብ ላይ" />
 			</div>
@@ -362,45 +372,6 @@
 				rows={1}
 				class="max-h-48 min-h-9 flex-1 resize-none border-none bg-transparent px-2 py-1.5 shadow-none focus-visible:ring-0"
 			/>
-			{#if editingClass}
-				<input
-					bind:value={targetClass}
-					use:focusOnMount
-					onblur={() => (editingClass = false)}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === 'Escape') {
-							e.preventDefault();
-							editingClass = false;
-						}
-					}}
-					placeholder="ለምሳሌ Bridge"
-					aria-label="ዒላማ ክፍል"
-					class="mb-1 h-7 w-28 shrink-0 rounded-full border bg-transparent px-3 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-				/>
-			{:else}
-				<div
-					class="mb-1 flex h-7 shrink-0 items-center rounded-full border text-xs text-muted-foreground"
-				>
-					<button
-						type="button"
-						class="h-full rounded-full px-3 hover:text-foreground"
-						onclick={() => (editingClass = true)}
-						title="የሚዛመድበት DBpedia ክፍል። ራስ-ሰር ከሆነ ረዳቱ ይወስናል።"
-					>
-						ክፍል፦ <span class="font-medium text-foreground">{targetClass.trim() || 'ራስ-ሰር'}</span>
-					</button>
-					{#if targetClass.trim()}
-						<button
-							type="button"
-							class="-ml-1.5 h-full pr-2.5 hover:text-foreground"
-							onclick={() => (targetClass = '')}
-							aria-label="ክፍሉን አጥፋ"
-						>
-							<Fa icon={faXmark} class="size-3" />
-						</button>
-					{/if}
-				</div>
-			{/if}
 			<Button
 				size="icon"
 				class="mb-0.5 size-8 shrink-0 rounded-full"

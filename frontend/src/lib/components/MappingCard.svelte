@@ -1,26 +1,20 @@
 <script lang="ts">
 	// One infobox result: every field in a single table (mapped, unmapped
 	// and removed), with each change marked and a footer to publish.
-	import {
-		BackendUnavailableError,
-		PublishFailedError,
-		findSemanticMatch,
-		publishMapping
-	} from '$lib/api';
+	import { BackendUnavailableError, findSemanticMatch } from '$lib/api';
 	import type { PipelineTurn } from '$lib/chat.svelte';
 	import { changesFor, originalFor, removedRows, rowChange } from '$lib/mapping-diff';
+	import { buildTemplateMapping } from '$lib/mapping-wikitext';
 	import type { MappingCandidate, PredictedMapping, UnmappedField } from '$lib/types';
 	import { cn } from '$lib/utils.js';
 	import { Button } from '$lib/components/ui/button/index.js';
 	import { Input } from '$lib/components/ui/input/index.js';
-	import * as AlertDialog from '$lib/components/ui/alert-dialog/index.js';
 	import ConfidencePill from './ConfidencePill.svelte';
 	import Fa from 'svelte-fa';
-	import { toast } from 'svelte-sonner';
 	import {
 		faCheck,
 		faCircleCheck,
-		faCloudUploadAlt,
+		faDownload,
 		faMagnifyingGlass,
 		faPen,
 		faPlus,
@@ -43,7 +37,10 @@
 		)
 	);
 	const domainClass = $derived(turn.domainClass ?? turn.targetClass ?? 'Thing');
-	const canPublish = $derived(Boolean(turn.templateName) && rows.length > 0 && !readonly);
+	const canDownload = $derived(rows.length > 0 && !readonly);
+	const downloadName = $derived(
+		`Mapping_am-${(turn.templateName ?? 'template').replace(/\s+/g, '_')}.wiki`
+	);
 
 	const changeSummary = $derived(
 		[
@@ -176,41 +173,22 @@
 		newProperty = '';
 	}
 
-	// Publishing writes to the live mappings wiki -- a real, hard-to-reverse
-	// edit -- so it always goes through the confirmation dialog first.
-	let confirmOpen = $state(false);
-
-	async function publish() {
-		if (!turn.templateName || turn.publishing) return;
-		turn.publishing = true;
-		turn.publishError = undefined;
-		const request = publishMapping({
-			templateName: turn.templateName,
-			domainClass,
-			mappings: rows,
-			originalMappings: original,
-			reviewItemId: turn.reviewItemId
-		});
-		toast.promise(request, {
-			loading: 'ወደ mappings.dbpedia.org በማተም ላይ…',
-			success: (result) => {
-				turn.published = { title: result.title, url: result.url };
-				return `${result.title} ታትሟል።`;
-			},
-			error: (err) => {
-				turn.publishError =
-					err instanceof PublishFailedError ? err.message : 'ለማተም አገልጋዩን ማግኘት አልተቻለም።';
-				return `ማተም አልተሳካም፦ ${turn.publishError}`;
-			}
-		});
-		try {
-			await request;
-		} catch {
-			// already surfaced via the toast.promise error callback above
-		} finally {
-			turn.publishing = false;
-			confirmOpen = false;
-		}
+	// Live publishing is wired in the backend (POST /v1/publish) but gated
+	// off from the UI for now -- the reviewer downloads the generated
+	// {{TemplateMapping ...}} wikitext and pastes it into the wiki page by
+	// hand. The publish button will come back later.
+	function download() {
+		if (!canDownload) return;
+		const wikitext = buildTemplateMapping(domainClass, rows);
+		const blob = new Blob([wikitext], { type: 'text/plain;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = downloadName;
+		document.body.appendChild(link);
+		link.click();
+		link.remove();
+		URL.revokeObjectURL(url);
 	}
 </script>
 
@@ -561,24 +539,12 @@
 				{/if}
 			</div>
 			<div class="flex flex-col items-end gap-0.5">
-				<Button
-					size="sm"
-					disabled={turn.publishing || !canPublish}
-					onclick={() => (confirmOpen = true)}
-				>
-					<Fa
-						icon={turn.publishing ? faSpinner : faCloudUploadAlt}
-						class="size-3.5 {turn.publishing ? 'animate-spin' : ''}"
-					/>
-					Publish · {rows.length} ዝምድናዎች
+				<Button size="sm" disabled={!canDownload} onclick={download}>
+					<Fa icon={faDownload} class="size-3.5" />
+					Download · {rows.length} ዝምድናዎች
 				</Button>
-				{#if !turn.templateName}
-					<span class="text-[11px] text-muted-foreground">የመለጠፊያ ስም ስላልተገኘ የሚታተምበት ገጽ የለም።</span>
-				{/if}
+				<span class="text-[11px] text-muted-foreground">{downloadName}</span>
 			</div>
-			{#if turn.publishError}
-				<p class="w-full text-sm text-destructive">{turn.publishError}</p>
-			{/if}
 		{/if}
 	</footer>
 </section>
@@ -638,57 +604,3 @@
 		</td>
 	</tr>
 {/snippet}
-
-<AlertDialog.Root bind:open={confirmOpen}>
-	<AlertDialog.Content>
-		<AlertDialog.Header>
-			<AlertDialog.Title>ወደ mappings.dbpedia.org ይታተም?</AlertDialog.Title>
-			<AlertDialog.Description>
-				ይህ
-				<span class="font-mono text-foreground">{rows.length}</span>
-				ዝምድናዎችን በተዋቀረው የቦት መለያ ወዲያውኑ ወደ
-				<span class="font-mono text-foreground">Mapping am:{turn.templateName}</span>
-				በቀጥታ ዊኪው ላይ ይጽፋል። በገጹ ላይ ያሉ ዝምድናዎች ይቀመጣሉ፤ ቀድሞ የተዛመደ መስክ ይዘመናል። ይህ ቅድመ እይታ ሳይሆን እውነተኛ ማስተካከያ ነው።
-			</AlertDialog.Description>
-		</AlertDialog.Header>
-		<ul class="max-h-64 space-y-1 overflow-y-auto rounded-lg border bg-muted/40 p-2">
-			{#each rows as row, i (i)}
-				{@const change = rowChange(original, row)}
-				<li class="font-mono text-xs">
-					{row.templateProperty} →
-					{#if change === 'edited'}
-						<span class="text-muted-foreground line-through"
-							>{originalFor(original, row.templateProperty)?.ontologyProperty}</span
-						>
-					{/if}
-					<span class="text-foreground">{row.ontologyProperty}</span>
-					{#if change}
-						<span class="font-sans text-[10px] text-warning-foreground dark:text-warning"
-							>({change === 'edited' ? 'ታርሟል' : 'ተጨምሯል'})</span
-						>
-					{/if}
-				</li>
-			{/each}
-			{#each removed as row, i (i)}
-				<li class="font-mono text-xs text-muted-foreground line-through">
-					{row.templateProperty} → {row.ontologyProperty}
-				</li>
-			{/each}
-		</ul>
-		<AlertDialog.Footer>
-			<AlertDialog.Cancel>ተወው</AlertDialog.Cancel>
-			<AlertDialog.Action
-				disabled={Boolean(turn.publishing)}
-				onclick={(e) => {
-					e.preventDefault();
-					publish();
-				}}
-			>
-				{#if turn.publishing}
-					<Fa icon={faSpinner} class="size-3.5 animate-spin" />
-				{/if}
-				Publish
-			</AlertDialog.Action>
-		</AlertDialog.Footer>
-	</AlertDialog.Content>
-</AlertDialog.Root>

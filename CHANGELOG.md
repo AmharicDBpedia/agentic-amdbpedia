@@ -1,5 +1,8 @@
 # Changelog
 
+- `feat(ui): Download button replaces Publish for now -- downloads the current (edited) {{TemplateMapping}} wikitext for the mapping; the publish backend stays wired for later`
+- `feat(ui): decode percent-encoded Amharic in Wikipedia URLs when echoing the user's message back`
+- `feat(ui): remove the class chip from the composer -- Groq infers the DBpedia class from the message`
 - `feat(ui): confirm/reject (✓/✗) step on every predicted row before the search and delete controls appear; the AI-proposed badge becomes (recommended)`
 - `feat(ui): the pipeline response is now only the mapping card -- the Groq summary bubble and the warnings list are gone`
 - `docs: README updated for the Amharic single-chat UI; architecture diagram as an editable Excalidraw scene (docs/architecture.excalidraw, exported to docs/architecture.svg)`

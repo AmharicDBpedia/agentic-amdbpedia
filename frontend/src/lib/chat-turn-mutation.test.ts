@@ -61,7 +61,7 @@ async function send(text: string) {
 
 const submitBridgeInfobox = () => send('{{Infobox bridge\n| ርዝመት = 1,700 ሜትር\n}}');
 
-describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
+describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => {
 	beforeEach(() => {
 		chat.turns.length = 0;
 		vi.spyOn(api, 'understandInput').mockResolvedValue(plan());
@@ -105,74 +105,66 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
 		expect(screen.queryByText(/review queue/i)).not.toBeInTheDocument();
-		expect(screen.getByRole('button', { name: /publish · 1/i })).toBeInTheDocument();
+		// Publish is gated off in the UI for now; the primary action is Download.
+		expect(screen.queryByRole('button', { name: /publish/i })).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /download · 1/i })).toBeInTheDocument();
 	});
 
-	it('publishes the edited table only after the confirmation dialog', async () => {
+	it('downloads the current (edited) mapping as {{TemplateMapping}} wikitext', async () => {
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
-		const publishSpy = vi.spyOn(api, 'publishMapping').mockResolvedValue({
-			status: 'published',
-			title: 'Mapping am:Infobox bridge',
-			url: 'https://mappings.dbpedia.org/index.php/Mapping_am:Infobox_bridge'
-		});
+		// publishMapping must not be called from the UI any more.
+		const publishSpy = vi.spyOn(api, 'publishMapping');
 
 		await submitBridgeInfobox();
 		const cell = (await screen.findByDisplayValue('length')) as HTMLInputElement;
-
-		// Edit right in the chat.
 		await fireEvent.input(cell, { target: { value: 'totalLength' } });
 
-		screen.getByRole('button', { name: /publish · 1/i }).click();
-		expect(publishSpy).not.toHaveBeenCalled();
+		const captured: { name: string | null; text: string | null } = { name: null, text: null };
+		const origBlob = globalThis.Blob;
+		const origCreate = URL.createObjectURL;
+		const origRevoke = URL.revokeObjectURL;
+		const origClick = HTMLAnchorElement.prototype.click;
+		// jsdom's Blob has no .text(); capture the string synchronously here.
+		globalThis.Blob = class extends origBlob {
+			constructor(parts: BlobPart[] = [], opts?: BlobPropertyBag) {
+				super(parts, opts);
+				captured.text = parts.map(String).join('');
+			}
+		} as typeof Blob;
+		URL.createObjectURL = () => 'blob:test';
+		URL.revokeObjectURL = () => {};
+		HTMLAnchorElement.prototype.click = function () {
+			if (this.download) captured.name = this.download;
+			origClick.call(this);
+		};
 
-		(await screen.findByRole('button', { name: /^publish$/i })).click();
-		await waitFor(() => {
-			expect(publishSpy).toHaveBeenCalledWith({
-				templateName: 'Infobox bridge',
-				domainClass: 'Bridge',
-				mappings: [{ templateProperty: 'ርዝመት', ontologyProperty: 'totalLength', confidence: 1 }],
-				originalMappings: [
-					{ templateProperty: 'ርዝመት', ontologyProperty: 'length', confidence: 0.75 }
-				],
-				reviewItemId: RUN_ID
-			});
-		});
-		await waitFor(() => {
-			expect(screen.getByRole('link', { name: 'Mapping am:Infobox bridge' })).toBeInTheDocument();
-			expect(screen.getByText('ታትሟል')).toBeInTheDocument();
-			expect(screen.queryByRole('button', { name: /publish · 1/i })).not.toBeInTheDocument();
-		});
-	});
+		try {
+			screen.getByRole('button', { name: /download · 1/i }).click();
+		} finally {
+			globalThis.Blob = origBlob;
+			URL.createObjectURL = origCreate;
+			URL.revokeObjectURL = origRevoke;
+			HTMLAnchorElement.prototype.click = origClick;
+		}
 
-	it('shows the server reason when a publish fails', async () => {
-		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
-		vi.spyOn(api, 'publishMapping').mockRejectedValue(
-			new api.PublishFailedError(
-				'MediaWiki bot credentials are not configured',
-				'mediawiki_credentials'
-			)
+		expect(captured.name).toBe('Mapping_am-Infobox_bridge.wiki');
+		expect(captured.text).toBe(
+			[
+				'{{TemplateMapping',
+				' | mapToClass = Bridge',
+				' | mappings =',
+				'  {{PropertyMapping | templateProperty = ርዝመት | ontologyProperty = totalLength }}',
+				'}}'
+			].join('\n')
 		);
-
-		await submitBridgeInfobox();
-		await screen.findByDisplayValue('length');
-		screen.getByRole('button', { name: /publish · 1/i }).click();
-		(await screen.findByRole('button', { name: /^publish$/i })).click();
-
-		await waitFor(() => {
-			expect(screen.getByText('MediaWiki bot credentials are not configured')).toBeInTheDocument();
-		});
+		expect(publishSpy).not.toHaveBeenCalled();
 	});
 
-	it('adds an unmapped field from the chat and publishes it with the rest', async () => {
+	it('adds an unmapped field from the chat and includes it in the download', async () => {
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 		const findSpy = vi.spyOn(api, 'findSemanticMatch').mockResolvedValue({
 			status: 'ok',
 			matches: [{ property: 'depiction', class: 'Thing', score: 0.9 }]
-		});
-		const publishSpy = vi.spyOn(api, 'publishMapping').mockResolvedValue({
-			status: 'published',
-			title: 'Mapping am:Infobox bridge',
-			url: 'https://mappings.dbpedia.org/index.php/Mapping_am:Infobox_bridge'
 		});
 
 		await submitBridgeInfobox();
@@ -189,23 +181,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተጨምሯል');
 		});
 
-		screen.getByRole('button', { name: /publish · 2/i }).click();
-		(await screen.findByRole('button', { name: /^publish$/i })).click();
-		await waitFor(() => {
-			expect(publishSpy).toHaveBeenCalledWith(
-				expect.objectContaining({
-					mappings: [
-						{ templateProperty: 'ርዝመት', ontologyProperty: 'length', confidence: 0.75 },
-						{
-							templateProperty: 'ካርታ_መግለጫ',
-							ontologyProperty: 'depiction',
-							confidence: 0.9,
-							source: 'manual'
-						}
-					]
-				})
-			);
-		});
+		expect(screen.getByRole('button', { name: /download · 2/i })).toBeEnabled();
 	});
 
 	it('looks up the field Groq pulled out of a free-form question', async () => {
@@ -288,31 +264,40 @@ describe('chat: Groq in, pipeline, Groq out, edit and publish in place', () => {
 		await waitFor(() => {
 			expect(screen.getByText('ተወግዷል፣ አይታተምም')).toBeInTheDocument();
 			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተወግዷል');
-			expect(screen.getByRole('button', { name: /publish · 0/i })).toBeDisabled();
+			expect(screen.getByRole('button', { name: /download · 0/i })).toBeDisabled();
 		});
 
 		screen.getByRole('button', { name: 'ርዝመት ወደነበረበት መልስ' }).click();
 		await waitFor(() => {
 			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
-			expect(screen.getByRole('button', { name: /publish · 1/i })).toBeEnabled();
+			expect(screen.getByRole('button', { name: /download · 1/i })).toBeEnabled();
 		});
 	});
 
-	it('sends the class chip value with the message', async () => {
+	it('leaves class inference to Groq -- the composer has no class picker', async () => {
 		const understandSpy = vi.spyOn(api, 'understandInput');
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 		render(ChatPage);
 
-		screen.getByRole('button', { name: /ክፍል፦ ራስ-ሰር/ }).click();
-		const classInput = await screen.findByLabelText('ዒላማ ክፍል');
-		await fireEvent.input(classInput, { target: { value: 'Bridge' } });
-		await fireEvent.keyDown(classInput, { key: 'Enter' });
-		expect(await screen.findByRole('button', { name: /ክፍል፦ Bridge/ })).toBeInTheDocument();
+		expect(screen.queryByLabelText('ዒላማ ክፍል')).not.toBeInTheDocument();
+		expect(screen.queryByText(/ክፍል፦/)).not.toBeInTheDocument();
 
 		const textarea = screen.getByPlaceholderText(/የመረጃ ሳጥን/);
 		await fireEvent.input(textarea, { target: { value: '{{Infobox bridge}}' } });
 		screen.getByRole('button', { name: 'ላክ' }).click();
-		await waitFor(() => expect(understandSpy).toHaveBeenCalledWith('{{Infobox bridge}}', 'Bridge'));
+		await waitFor(() => expect(understandSpy).toHaveBeenCalledWith('{{Infobox bridge}}'));
+	});
+
+	it('decodes percent-encoded Amharic Wikipedia URLs when echoing them back', async () => {
+		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
+		vi.spyOn(api, 'understandInput').mockResolvedValue(
+			plan({ intent: 'url', text: 'https://am.wikipedia.org/wiki/x', target_class: null })
+		);
+
+		await send(
+			'https://am.wikipedia.org/wiki/%E1%88%98%E1%88%88%E1%8C%A0%E1%8D%8A%E1%8B%AB:%E1%8B%A8%E1%88%B6%E1%8D%8D%E1%89%B5%E1%8B%8C%E1%88%AD_%E1%88%98%E1%88%A8%E1%8C%83_%E1%88%B3%E1%8C%A5%E1%8A%95'
+		);
+		await screen.findByText('https://am.wikipedia.org/wiki/መለጠፊያ:የሶፍትዌር_መረጃ_ሳጥን');
 	});
 
 	it('a predicted row shows ✓/✗ until the reviewer acts, then the fix tools', async () => {
