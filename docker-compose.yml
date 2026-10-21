@@ -51,6 +51,7 @@ services:
       timeout: 3s
       retries: 6
       start_period: 5s
+    restart: unless-stopped
 
   # Local LLM for the pipeline (PREDICT_MODEL=gemma2 -> ollama_chat/gemma2:9b,
   # reached at LiteLLM's default http://localhost:11434). Models live in the
