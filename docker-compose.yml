@@ -1,4 +1,40 @@
 services:
+  backend:
+    image: agentic-amdbpedia-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL_FAST: ${GROQ_MODEL_FAST:-qwen/qwen3.8-27b}
+      GROQ_MODEL_REASONING: ${GROQ_MODEL_REASONING:-qwen/qwen3.8-27b}
+      PREDICT_MODEL: ${PREDICT_MODEL:-groq/qwen/qwen3.8-27b}
+      PREDICT_FALLBACK_MODEL: ${PREDICT_FALLBACK_MODEL:-none}
+      DATABASE_URL: postgresql+asyncpg://mapping_assistant:mapping_assistant@postgres:5432/mapping_assistant
+    ports:
+      - "8001:8001"
+    volumes:
+      - backend_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    image: agentic-amdbpedia-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      PUBLIC_CROSS_LINGUAL_URL: ${PUBLIC_CROSS_LINGUAL_URL:-http://localhost:8001}
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -24,6 +60,7 @@ services:
   # CPU-only by default; on a machine with a working NVIDIA driver and the
   # NVIDIA Container Toolkit, add `gpus: all` to this service.
   ollama:
+    profiles: ["local-llm"]
     image: ollama/ollama:latest
     ports:
       - "11434:11434"
@@ -48,6 +85,7 @@ services:
   # here for poking at a loaded graph by hand: `docker compose run --rm
   # tentris -f /data/<file>.nt` (mount the file under ./data first).
   tentris:
+    profiles: ["qa"]
     image: dicegroup/tentris_server:latest
     ports:
       - "9080:9080"
@@ -56,5 +94,6 @@ services:
     command: ["-p", "9080", "--logfile=false"]
 
 volumes:
+  backend_data:
   postgres_data:
   ollama_models:
