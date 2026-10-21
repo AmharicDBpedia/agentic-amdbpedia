@@ -82,7 +82,8 @@ describe('sidebar', () => {
 		expect(screen.getByTitle('ውይይት')).toBeInTheDocument();
 		expect(screen.getByTitle('ሽፋን')).toBeInTheDocument();
 		const guide = screen.getByTitle('የአጠቃቀም መመሪያ');
-		expect(guide).toHaveAttribute('href', '/documentation.html');
+		expect(guide).toHaveAttribute('href', '/how-to-use.html');
+		expect(screen.getByTitle('Documentation')).toHaveAttribute('href', '/documentation.html');
 		// A static page: the client router must not handle it.
 		expect(guide).toHaveAttribute('data-sveltekit-reload');
 		expect(screen.queryByPlaceholderText(/search chats/i)).toBeNull();

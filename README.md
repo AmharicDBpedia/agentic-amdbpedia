@@ -5,9 +5,9 @@ English DBpedia ontology.
 
 The project combines hybrid retrieval, a local LLM (Gemma 2 9B via Ollama), Groq
 for understanding the user's message and writing the reply, MCP tools, and a
-SvelteKit chat. It proposes ontology mappings, lets you edit them in the chat,
-generates deterministic MediaWiki syntax, and publishes only when you press
-Publish and confirm.
+SvelteKit chat in Amharic. It proposes ontology mappings, lets you edit them in
+the chat with every change marked, generates deterministic MediaWiki syntax,
+and publishes only when you press Publish and confirm.
 
 ## Domain
 
@@ -26,32 +26,38 @@ deterministic mapping syntax instead of letting a language model invent XML.
 - Hybrid dense and sparse search across roughly 2,948 DBpedia properties
 - Amharic aliases enriched from published DBpedia mappings
 - A four-step infobox pipeline: extract, predict, format, and save a run record
-- A SvelteKit chat: ask in Amharic or English, edit the mapping table in place,
-  publish from the chat, and view coverage
+- Input as infobox wikitext, an am.wikipedia.org article link, a template page
+  link (`መለጠፊያ:…`), or a single field name
+- A SvelteKit chat with an Amharic interface: one conversation per browser
+  tab, a mapping card that marks every edit, publishing from the chat, a
+  coverage page, and a usage guide
 - MCP tools for semantic matching and deterministic XML generation
 - Optional, consent-gated publication to `mappings.dbpedia.org`
 - Evaluation, integration, end-to-end, and performance test suites
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    U[User message] --> G1[Groq: understand<br/>intent, field, class]
-    G1 --> A[Amharic field or infobox]
-    A --> B[Validate and extract]
-    B --> L{Published before<br/>for this class?}
-    L -->|yes| E
-    L -->|no| C[Dense and sparse retrieval]
-    C -->|confident| D[LLM rerank]
-    C -->|no confident match| P[LLM propose, then<br/>select among suggestions]
-    D --> E[Deterministic mapping output]
-    P --> E
-    E --> G2[Groq: write the reply]
-    G2 --> F[Editable table in the chat]
-    F -->|Publish + confirm| G[MediaWiki publish]
-    G --> K[Learned aliases]
-    G --> H[Training log]
-```
+![Architecture: the SvelteKit frontend talks to the HTTP API, which uses Groq before and after the LangGraph pipeline; the pipeline checks learned aliases, then hybrid retrieval, then the LLM (Gemma via Ollama, Groq fallback); Publish writes to mappings.dbpedia.org](docs/architecture.svg)
+
+The diagram is an Excalidraw scene: open
+[`docs/architecture.excalidraw`](docs/architecture.excalidraw) at
+[excalidraw.com](https://excalidraw.com) to edit it, then export it over
+`docs/architecture.svg`.
+
+A message goes through these steps:
+
+1. **Groq reads it** (`/v1/assist/understand`): an infobox, a Wikipedia link,
+   or a field inside a question, and which DBpedia class it belongs to.
+2. **A link is fetched** from am.wikipedia.org. For a template page, the
+   template's declared parameters are mapped directly.
+3. **The pipeline runs** (`/v1/preview`, streamed over SSE): extract the
+   fields, predict a property for each, format the mapping syntax, and save a
+   run record.
+4. **Groq writes the reply** in Amharic (`/v1/assist/summarize`), and the
+   result appears as an editable mapping card.
+5. **Publish** (`/v1/publish`) writes the edited rows to
+   `Mapping am:<template>` on mappings.dbpedia.org after you confirm. The
+   published rows become learned aliases for the next request.
 
 Retrieval runs locally and merges semantic and lexical rankings using reciprocal
 rank fusion. When it finds a confident match, the LLM reranks the candidates
@@ -74,7 +80,7 @@ Groq does the two language jobs around the mapping, never the mapping itself:
   `Newspaper`). It also infers the DBpedia class from an infobox's template
   name. A class is only used if it really exists in the ontology, and a field
   only if you actually typed it. Prompt-injection text never reaches Groq.
-- **After:** it turns the result into a short reply in your language: what
+- **After:** it turns the result into a short reply in Amharic: what
   mapped, what the AI model suggested and should be checked, and what is still
   unmapped with the closest suggestions. A reply that names a property not in
   the result is discarded and replaced by a plain summary.
@@ -103,7 +109,12 @@ Ollama natively instead (`sudo dnf install ollama`, then `ollama serve` and
 `ollama pull gemma2:9b`).
 
 Without a GPU, Gemma 2 9B needs several seconds per answer, so
-`PREDICT_LLM_TIMEOUT_SECONDS` defaults to 60. If neither model can be reached,
+`PREDICT_LLM_TIMEOUT_SECONDS` defaults to 60. It also needs about 6.3 GB of
+free RAM. On a machine with less, make Groq the mapping model instead:
+
+```bash
+env -u GROQ_API_KEY PREDICT_MODEL=groq/qwen/qwen3.8-27b PREDICT_FALLBACK_MODEL=none just run-http
+``` If neither model can be reached,
 the result says so (`llm_error`) instead of reporting "no such property".
 
 > **Stale keys:** an exported shell variable takes precedence over `.env`.
@@ -151,7 +162,16 @@ selects the next available port and prints it.
 The first startup downloads the embedding models and builds the local ontology
 index. Later starts reuse the cache in `data/.cache/`.
 
-### 3. Start the frontend
+### 3. Start Ollama (optional)
+
+```bash
+docker compose up -d ollama
+docker compose exec ollama ollama pull gemma2:9b   # once
+```
+
+Without Ollama, every LLM call falls back to Groq.
+
+### 4. Start the frontend
 
 In another terminal:
 
@@ -166,18 +186,40 @@ The frontend expects the API at `http://localhost:8001`. Set
 
 ## Using the application
 
-- Paste an Amharic infobox or a Wikipedia link to run the full pipeline.
-- Ask about a field, in Amharic or English, or just type the field name.
-- Edit the result in the chat: change a property (the search button shows real
-  ontology candidates), remove a row, add one, or pick a suggestion for an
-  unmapped field.
-- Press **Publish**, review the confirmation, and confirm. The edited rows are
-  written to `Mapping am:<template>` on mappings.dbpedia.org.
-- Open `/coverage` to see published template coverage.
+The interface is in Amharic. Open http://localhost:5173.
+
+- **Send a message:** paste infobox wikitext, an am.wikipedia.org article
+  link, a template link such as
+  `https://am.wikipedia.org/wiki/መለጠፊያ:የምግብ_መረጃ`, or a field name or
+  question. To fix the DBpedia class, set the **ክፍል፦ ራስ-ሰር** chip next to
+  the send button (for example `Zoo`); otherwise Groq infers it.
+- **Edit the mapping card:** every infobox field is a row, and every
+  property is an editable box with an ontology search beside it.
+  - Edited rows get an amber bar and show the original property with
+    **መልስ** (undo).
+  - Added rows get a green bar.
+  - Removed rows stay struck through until you restore them.
+  - AI-proposed rows say **ያረጋግጡ** (check this).
+  - Unmapped fields are empty rows with the closest suggestions.
+  - The header counts the changes (**ረቂቅ · 1 ታርሟል**), and **ሁሉንም መልስ**
+    undoes them all.
+- **Publish:** press **Publish**, review the before → after list, and
+  confirm. The rows are written to `Mapping am:<template>` on
+  mappings.dbpedia.org.
+- **Chat history:** the chat is kept in the browser tab only. A reload keeps
+  it, closing the tab removes it, and **ውይይቱን አጽዳ** in the sidebar starts
+  over (it asks first if edits are unpublished).
+- **Sidebar:** open **ሽፋን** for published template coverage and
+  **የአጠቃቀም መመሪያ** for the usage guide (`frontend/static/documentation.html`).
 
 Publishing is never automatic. It needs the confirmation in the chat, and
 `.env` must contain a MediaWiki bot username (`User@BotName`) and bot password
 from `Special:BotPasswords`. Never use your normal MediaWiki account password.
+
+> **Publishing to mappings.dbpedia.org currently fails** with
+> `writeapidenied`. That wiki denies the `writeapi` right to anonymous users,
+> so every API login is refused, whatever the bot's grants. A wiki admin has
+> to restore the MediaWiki default `$wgGroupPermissions['*']['writeapi'] = true;`.
 
 Worked inputs and expected responses are available in
 [`examples/demo.md`](examples/demo.md).
@@ -223,7 +265,9 @@ run and therefore require network access.
 
 - [`implementation.md`](implementation.md) — roadmap and implementation detail
 - [`examples/demo.md`](examples/demo.md) — complete demo transcripts
+- [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — the architecture diagram (Excalidraw source)
 - [`frontend/README.md`](frontend/README.md) — frontend routes and API contracts
+- [`frontend/static/documentation.html`](frontend/static/documentation.html) — the usage guide shown in the app
 - [`corpus-refresh.md`](corpus-refresh.md) — refreshing ontology and mapping data
 - [`evaluation/results.md`](evaluation/results.md) — retrieval evaluation results
 - [`CHANGELOG.md`](CHANGELOG.md) — notable project changes

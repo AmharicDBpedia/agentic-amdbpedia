@@ -27,9 +27,9 @@
 
 <div class="mx-auto h-full max-w-5xl overflow-y-auto px-4 py-6 md:px-8 md:py-10">
 	<div class="mb-8">
-		<h1 class="text-2xl font-semibold tracking-tight">የማውጣት ሽፋን</h1>
+		<h1 class="text-2xl font-semibold tracking-tight">Extraction coverage</h1>
 		<p class="mt-1 text-sm text-muted-foreground">
-			ይህ ሂደት ካስተናገዳቸው የመረጃ ሳጥን መለጠፊያዎች ውስጥ ስንቶቹ ዝምድናቸው በቀጥታ ዊኪው ላይ እንደታተመ ያሳያል።
+			ይህ ሂደት ካስተናገዳቸው infobox templates ውስጥ ስንቶቹ mapping በቀጥታ ዊኪው ላይ እንደታተመ ያሳያል።
 		</p>
 	</div>
 
@@ -50,7 +50,7 @@
 		<div class="grid grid-cols-3 gap-4">
 			<Card>
 				<CardHeader>
-					<CardDescription>መለጠፊያዎች</CardDescription>
+					<CardDescription>Templates</CardDescription>
 					<CardTitle class="text-2xl tabular-nums">{stats.totalTemplates}</CardTitle>
 				</CardHeader>
 			</Card>

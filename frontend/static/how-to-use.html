@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="am">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>የአጠቃቀም መመሪያ · agentic-amdbpedia</title>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@400;500;600;700&display=swap"
+			rel="stylesheet"
+		/>
+		<style>
+			:root {
+				color-scheme: light dark;
+				--bg: #ffffff;
+				--fg: #1a1a1a;
+				--muted: #5c5c5c;
+				--border: #e4e4e7;
+				--accent: #c2410c;
+				--accent-soft: #fff7ed;
+				--code-bg: #f4f4f5;
+			}
+			@media (prefers-color-scheme: dark) {
+				:root {
+					--bg: #0f0f11;
+					--fg: #ededed;
+					--muted: #a1a1aa;
+					--border: #27272a;
+					--accent: #fb923c;
+					--accent-soft: #1f1612;
+					--code-bg: #1c1c1f;
+				}
+			}
+			* {
+				box-sizing: border-box;
+			}
+			body {
+				margin: 0;
+				background: var(--bg);
+				color: var(--fg);
+				font-family: 'Noto Sans Ethiopic', system-ui, -apple-system, 'Segoe UI', sans-serif;
+				line-height: 1.75;
+			}
+			main {
+				max-width: 880px;
+				margin: 0 auto;
+				padding: 2.5rem 1.25rem 5rem;
+			}
+			h1 {
+				font-size: 2rem;
+				font-weight: 700;
+				margin-bottom: 0.25rem;
+			}
+			h2 {
+				font-size: 1.4rem;
+				font-weight: 600;
+				margin-top: 2.5rem;
+				border-bottom: 1px solid var(--border);
+				padding-bottom: 0.4rem;
+			}
+			h3 {
+				font-size: 1.1rem;
+				font-weight: 600;
+				margin-top: 1.75rem;
+			}
+			p,
+			li {
+				color: var(--fg);
+			}
+			.lead {
+				color: var(--muted);
+				font-size: 1.05rem;
+			}
+			code,
+			kbd {
+				background: var(--code-bg);
+				padding: 0.1rem 0.4rem;
+				border-radius: 0.3rem;
+				font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+				font-size: 0.9em;
+				direction: ltr;
+				unicode-bidi: embed;
+			}
+			a {
+				color: var(--accent);
+			}
+			.back {
+				display: inline-block;
+				margin-bottom: 1.5rem;
+				font-size: 0.9rem;
+			}
+			ol.steps {
+				counter-reset: step;
+				list-style: none;
+				padding: 0;
+				margin: 0;
+			}
+			ol.steps > li {
+				counter-increment: step;
+				position: relative;
+				padding: 1.1rem 1.1rem 1.1rem 3.5rem;
+				margin: 1rem 0;
+				border: 1px solid var(--border);
+				border-radius: 0.75rem;
+				background: var(--bg);
+			}
+			ol.steps > li::before {
+				content: counter(step);
+				position: absolute;
+				left: 0.9rem;
+				top: 1rem;
+				width: 2rem;
+				height: 2rem;
+				display: grid;
+				place-items: center;
+				background: var(--accent);
+				color: #fff;
+				border-radius: 999px;
+				font-weight: 700;
+				font-size: 1rem;
+			}
+			ol.steps > li > h3 {
+				margin: 0 0 0.5rem;
+				font-size: 1.1rem;
+			}
+			figure {
+				margin: 1rem 0 0.25rem;
+			}
+			figure img {
+				max-width: 100%;
+				height: auto;
+				border: 1px solid var(--border);
+				border-radius: 0.5rem;
+				display: block;
+			}
+			figure figcaption {
+				margin-top: 0.5rem;
+				font-size: 0.85rem;
+				color: var(--muted);
+				line-height: 1.55;
+			}
+			.note {
+				background: var(--accent-soft);
+				border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+				border-left: 4px solid var(--accent);
+				border-radius: 0.5rem;
+				padding: 0.9rem 1.1rem;
+				margin: 1rem 0;
+			}
+			.badge-row {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 0.5rem;
+				margin: 0.75rem 0;
+			}
+			.badge {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.35rem;
+				padding: 0.25rem 0.6rem;
+				border-radius: 999px;
+				font-size: 0.85rem;
+				border: 1px solid var(--border);
+				background: var(--code-bg);
+			}
+			.badge .dot {
+				width: 0.6rem;
+				height: 0.6rem;
+				border-radius: 50%;
+			}
+			.dot.ok {
+				background: #16a34a;
+			}
+			.dot.warn {
+				background: #f59e0b;
+			}
+			.dot.err {
+				background: #dc2626;
+			}
+			footer {
+				margin-top: 3rem;
+				padding-top: 1.25rem;
+				border-top: 1px solid var(--border);
+				color: var(--muted);
+				font-size: 0.85rem;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<a class="back" href="/">← ወደ app ተመለስ</a>
+
+			<h1>የአጠቃቀም መመሪያ</h1>
+			<p class="lead">
+				የአማርኛ Wikipedia infobox-ን ወይም template-ን ወደ DBpedia ontology እንዴት እንደሚያዛምዱና
+				የተዛመደውን <code>{{TemplateMapping}}</code> wikitext እንዴት እንደሚያወርዱ የሚያሳይ ዝርዝር ነው።
+				የ DBpedia ጽንሰ-ሐሳብና ዝርዝር ዳራ ለማግኘት
+				<a href="/documentation.html">Documentation</a> ገጹን ይመልከቱ።
+			</p>
+
+			<h2>የአጠቃቀም ፍሰት</h2>
+			<figure>
+				<img src="/images/howto/00-flow.svg" alt="six-step flow from message to mappings.dbpedia.org" />
+				<figcaption>
+					6 ደረጃዎች፦ መልዕክት መላክ → pipeline መሄድ → mapping card መታየት → ያልተዛመዱ መስኮች መፈለግ → file
+					መውረድ → ወደ mappings.dbpedia.org መለጠፍ።
+				</figcaption>
+			</figure>
+
+			<h2>ደረጃ በደረጃ</h2>
+			<ol class="steps">
+				<li>
+					<h3>መልዕክት ይላኩ</h3>
+					<p>በ app የመጀመሪያ ገጽ ላይ ከሚከተሉት አንዱን ይለጥፉ፦</p>
+					<ul>
+						<li>የ infobox wikitext (<code>{{Infobox …}}</code> በቀጥታ)</li>
+						<li>የ Wikipedia ገጽ URL (ለምሳሌ <code>https://am.wikipedia.org/wiki/…</code>)</li>
+						<li>
+							የ template አድራሻ (ለምሳሌ
+							<code>https://am.wikipedia.org/wiki/መለጠፊያ:የምግብ_መረጃ</code>)
+						</li>
+						<li>አንድ የ field ስም (ለምሳሌ <code>አይካኦ_ኮድ</code>)</li>
+					</ul>
+					<p>
+						Groq መልዕክቱን ያነባል፣ ዓይነቱን (infobox፣ URL፣ template ወይም field question) ይለያል፣
+						ተገቢውን DBpedia class ይገምታል።
+					</p>
+					<figure>
+						<img src="/images/howto/01-empty.png" alt="empty chat screen with sample buttons" />
+						<figcaption>የ app የመጀመሪያ ገጽ፦ መልዕክት የምትልክበት ሳጥንና የ example buttons።</figcaption>
+					</figure>
+				</li>
+
+				<li>
+					<h3>Pipeline ይጠናቀቅ</h3>
+					<p>
+						ከዚያ pipeline-ው 4 ደረጃዎች ውስጥ ይሄዳል፦ <code>infobox fields ማውጣት</code> →
+						<code>ontology properties መተንበይ</code> → <code>mapping XML ማመንጨት</code> →
+						<code>run record ማስቀመጥ</code>። ለ Wikipedia link ተጨማሪ የመጀመሪያ ደረጃ አለ፦
+						<code>Wikipedia source ማምጣት</code>። ጊዜው የሚወስደው 10–60 ሰከንድ ነው (model እና
+						infobox-ው መጠን ላይ ተመርኩዞ)።
+					</p>
+				</li>
+
+				<li>
+					<h3>Mapping card ይታያል</h3>
+					<p>
+						እያንዳንዱ የ infobox መስክ አንድ ረድፍ ነው። ረድፉ በመጀመሪያ read-only ነው፦ የ DBpedia
+						property እንደ ጽሁፍ ይታያል፣ ከዚያ ጎን ላይ ✎ (ለማረም) እና 🗑 (ለማስወገድ) buttons አሉ።
+					</p>
+					<figure>
+						<img src="/images/howto/02-card-collapsed.png" alt="mapping card collapsed, each row shows property + edit/delete buttons" />
+						<figcaption>
+							የመጀመሪያ ሁኔታ፦ ለእያንዳንዱ ረድፍ የ ✎ (pencil, አርትዕ) እና የ 🗑 (trash,
+							አስወግድ) buttons ብቻ፣ የ confidence pill ከፕሮፐርቲው ጎን።
+						</figcaption>
+					</figure>
+				</li>
+
+				<li>
+					<h3>ያርሙ (pencil ✎)</h3>
+					<p>
+						የ ✎ (pencil) button ን ይጫኑ፣ የ inline editor ይከፈታል፦ የ property input፣ የ
+						ontology search button፣ እና አረንጓዴ የ ✓ (አርትዖትን ጨርስ) button። ያርሙ ወይም search
+						ያድርጉ፣ ከዛ ✓ ን ይጫኑ።
+					</p>
+					<figure>
+						<img src="/images/howto/03-row-editing.png" alt="row in edit mode with input, search button, and confirm button" />
+						<figcaption>
+							የ pencil button ተጭኗል፦ የ property input፣ ontology search 🔍 ና አረንጓዴው ✓
+							(አርትዖትን ጨርስ) ይታያሉ። ጥንታዊው 🗑 button አሁንም ይገኛል።
+						</figcaption>
+					</figure>
+				</li>
+
+				<li>
+					<h3>ተረጋግጧል የሚል ምልክት</h3>
+					<p>
+						✓ ን ሲጫኑ editor ይዘጋል፣ "<strong>ተረጋግጧል</strong>" የሚል አረንጓዴ ምልክት ይታያል።
+						ይህ ረድፉ በእርስዎ እንደተገመገመ ያሳያል።
+					</p>
+					<figure>
+						<img src="/images/howto/04-row-confirmed.png" alt="row with a green ተረጋግጧል badge below the property" />
+						<figcaption>
+							ረድፉ ተረጋግጧል፦ አረንጓዴ ✓ ተረጋግጧል ከ confidence pill ጎን። Pencil ና trash
+							buttons ገና አሉ (በኋላ መልስ ለማረም ወይም ለማስወገድ)።
+						</figcaption>
+					</figure>
+				</li>
+
+				<li>
+					<h3>ያልተዛመዱ መስኮች ይጨምሩ</h3>
+					<p>
+						pipeline-ው ያልቻላቸው መስኮች በ table ላይ ባዶ ረድፎች ሆነው ይታያሉ (dashed border)።
+						ከታች ባሉት suggestions ውስጥ ይምረጡ፣ ወይም የ property name ይተይቡና + ን ይጫኑ፣
+						ወይም 🔍 በመጠቀም ontology ን ይፈልጉ። አዲስ መስክ ለማስገባት የ "+ ሌላ የመረጃ ሳጥን መስክ"
+						ረድፍን ይጠቀሙ።
+					</p>
+				</li>
+
+				<li>
+					<h3>Download</h3>
+					<p>
+						ሁሉም ረድፎች ዝግጁ ሲሆኑ የ <strong>Download</strong> button ን ይጫኑ። የ
+						<code>{{TemplateMapping}}</code> wikitext ተፈጥሮ እንደ
+						<code>Mapping_am-&lt;template&gt;.wiki</code> file ይወርዳል።
+					</p>
+					<figure>
+						<img src="/images/howto/05-download-footer.png" alt="footer with Download · 3 ዝምድናዎች and the filename below" />
+						<figcaption>
+							የ card የታችኛው ክፍል፦ የ Download button፣ ከታች ያለው የ file ስም
+							(<code>Mapping_am-Infobox_bridge.wiki</code>)። የ changes counter ና
+							"ሁሉንም መልስ" በግራ በኩል ሲጨመሩ ይታያሉ።
+						</figcaption>
+					</figure>
+				</li>
+
+				<li>
+					<h3>ወደ <code>mappings.dbpedia.org</code> ለጥፉ</h3>
+					<p>
+						በ browser ላይ
+						<code>https://mappings.dbpedia.org/index.php/Mapping_am:&lt;template&gt;</code> ን
+						ይክፈቱ፣ login ያድርጉ፣ edit tab ን ይጫኑ፣ ያወረዱትን wikitext ይለጥፉ፣ save ያድርጉ።
+					</p>
+					<div class="note">
+						<strong>ማስታወሻ፦</strong> በቀጥታ ከ app internally publish ማድረግ አሁን
+						available አይደለም (publish button በኋላ ይመለሳል)። ለአሁን download → paste
+						የሚባለው workflow ነው ጥቅም ላይ ያለው።
+					</div>
+				</li>
+			</ol>
+
+			<h2>ተጨማሪ ነገር</h2>
+			<ul>
+				<li>
+					<strong>Chat memory፦</strong> ውይይቱ በ browser tab ውስጥ ብቻ ይቀመጣል። reload ያደረጉት
+					edit-ን ይጠብቃል፤ tab ን ሲዘጉ ይጠፋል።
+				</li>
+				<li>
+					<strong>ውይይቱን አጽዳ (Clear chat):</strong> በ sidebar ላይ ያለው button ውይይቱን
+					ያጸዳል። ያልተለቀቁ edits ካሉ ማረጋገጫ ይጠይቃል።
+				</li>
+				<li>
+					<strong>የ class ግምት:</strong> Groq ራሱ ተገቢውን DBpedia class (<code>Bridge</code>፣
+					<code>Zoo</code>፣ <code>Food</code> ወ.ዘ.ተ.) ይገምታል። ስለሚገምተው ነገር መልዕክቱ
+					ላይ ተጨማሪ context መጨመር ይረዳል።
+				</li>
+			</ul>
+
+			<footer>
+				ተጨማሪ ዝርዝር መረጃ ለማግኘት የ project <code>README.md</code> ን እና
+				<a href="/documentation.html">Documentation</a> ገጹን ይመልከቱ።
+			</footer>
+		</main>
+	</body>
+</html>

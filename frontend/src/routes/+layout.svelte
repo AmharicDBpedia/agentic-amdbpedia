@@ -19,7 +19,7 @@
 <ModeWatcher />
 <Toaster richColors closeButton expand position="top-center" />
 
-<div class="flex h-svh overflow-hidden">
+<div class="flex h-full overflow-hidden">
 	<AppSidebar bind:open={sidebarOpen} />
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">

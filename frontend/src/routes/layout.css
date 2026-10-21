@@ -111,7 +111,13 @@
 	* {
 		@apply border-border outline-ring/50;
 	}
+	html,
+	body {
+		height: 100%;
+	}
 	body {
 		@apply bg-background text-foreground;
+		/* The app shell owns the single scroll area; the page itself never scrolls. */
+		overflow: hidden;
 	}
 }
