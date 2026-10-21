@@ -59,6 +59,18 @@ describe('the single chat', () => {
 		expect(hasUnpublishedEdits([turn])).toBe(false);
 	});
 
+	it('does not flag a card whose current edits match the last download', () => {
+		const turn = bridgeTurn();
+		turn.edited![0].ontologyProperty = 'totalLength';
+		expect(hasUnpublishedEdits([turn])).toBe(true);
+		// User clicks Download → MappingCard records the snapshot.
+		turn.downloadedSnapshot = JSON.stringify(turn.edited);
+		expect(hasUnpublishedEdits([turn])).toBe(false);
+		// A new edit after download re-flags the card.
+		turn.edited![0].ontologyProperty = 'span';
+		expect(hasUnpublishedEdits([turn])).toBe(true);
+	});
+
 	it('clearChat empties the chat and its saved copy', () => {
 		chat.turns.push(bridgeTurn());
 		saveChat();

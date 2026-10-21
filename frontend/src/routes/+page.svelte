@@ -25,10 +25,14 @@
 	// every Amharic character as %XX). Showing them raw in the message
 	// bubble looks like noise, so decode for display -- the string the
 	// backend fetched is still the one in `turn.input`.
+	// `decodeURI` is deliberately avoided: it refuses to decode percent-
+	// encoded reserved chars (`%3A`, `%2F`, `%3F`, ...), so a URL with an
+	// encoded colon (common when copied from logs or tooling) would still
+	// show as `መለጠፊያ%3Aየሶፍትዌር…`. `decodeURIComponent` decodes everything.
 	function displayInput(text: string): string {
 		if (!looksLikeWikipediaUrl(text)) return text;
 		try {
-			return decodeURI(text);
+			return decodeURIComponent(text);
 		} catch {
 			return text;
 		}

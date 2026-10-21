@@ -42,6 +42,11 @@ export interface PipelineTurn {
 	publishing?: boolean;
 	publishError?: string;
 	published?: { title: string; url: string };
+	// Snapshot of `edited` the last time the user clicked Download, as JSON.
+	// `hasUnpublishedEdits` compares it with the current `edited` to tell
+	// "unsaved" from "already downloaded" without threading a flag through
+	// every mutation path.
+	downloadedSnapshot?: string;
 	running: boolean;
 	error?: string;
 }
@@ -123,14 +128,14 @@ export function clearChat() {
 	}
 }
 
-/** True when some mapping card has changes nobody has published yet. */
+/** True when some mapping card has changes that have not been downloaded
+ * (or published) yet. A card the user already Downloaded does not count,
+ * even if `edited` still differs from `mappings`. */
 export function hasUnpublishedEdits(turns: Turn[] = chat.turns): boolean {
-	return turns.some(
-		(turn) =>
-			turn.kind === 'pipeline' &&
-			!turn.published &&
-			turn.mappings !== null &&
-			turn.edited !== undefined &&
-			changesFor(turn.mappings, turn.edited).total > 0
-	);
+	return turns.some((turn) => {
+		if (turn.kind !== 'pipeline' || turn.published) return false;
+		if (turn.mappings === null || turn.edited === undefined) return false;
+		if (changesFor(turn.mappings, turn.edited).total === 0) return false;
+		return JSON.stringify(turn.edited) !== turn.downloadedSnapshot;
+	});
 }

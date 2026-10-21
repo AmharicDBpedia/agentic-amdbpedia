@@ -150,7 +150,7 @@
 				href={link.href}
 				data-sveltekit-reload={link.page || undefined}
 				target={link.newTab ? '_blank' : undefined}
-				rel={link.newTab ? 'noreferrer' : undefined}
+				rel={link.newTab ? 'noopener noreferrer' : undefined}
 				onclick={() => (open = false)}
 				title={link.label}
 				class={cn(
@@ -178,7 +178,8 @@
 		<AlertDialog.Header>
 			<AlertDialog.Title>ውይይቱ ይጽዳ?</AlertDialog.Title>
 			<AlertDialog.Description>
-				አንዳንድ ዝምድናዎች ያልታተሙ እርማቶች አሏቸው። ውይይቱን ማጽዳት እነዚያን እርማቶች ያጠፋል። ቀድሞ የታተመው ዊኪው ላይ ይቆያል።
+				አንዳንድ ዝምድናዎች ያልወረዱ እርማቶች አሏቸው። ውይይቱን ማጽዳት እነዚያን እርማቶች ያጠፋል። ቀድሞ የወረዱ ፋይሎች ግን በ computer ላይ
+				ይቆያሉ።
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<AlertDialog.Footer>

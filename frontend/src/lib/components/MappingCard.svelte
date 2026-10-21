@@ -4,7 +4,8 @@
 	import { BackendUnavailableError, findSemanticMatch } from '$lib/api';
 	import type { PipelineTurn } from '$lib/chat.svelte';
 	import { changesFor, originalFor, removedRows, rowChange } from '$lib/mapping-diff';
-	import { buildTemplateMapping } from '$lib/mapping-wikitext';
+	import { UnsafeMappingValueError, buildTemplateMapping } from '$lib/mapping-wikitext';
+	import { toast } from 'svelte-sonner';
 	import type { MappingCandidate, PredictedMapping, UnmappedField } from '$lib/types';
 	import { cn } from '$lib/utils.js';
 	import { Button } from '$lib/components/ui/button/index.js';
@@ -37,8 +38,13 @@
 	);
 	const domainClass = $derived(turn.domainClass ?? turn.targetClass ?? 'Thing');
 	const canDownload = $derived(rows.length > 0 && !readonly);
+	// Collapse whitespace and strip chars Windows (NTFS/FAT) rejects: `\\/:*?"<>|`.
+	// Amharic Ethiopic chars survive because they're not in that set, so the
+	// filename still carries the template name a reviewer pastes back to the wiki.
 	const downloadName = $derived(
-		`Mapping_am-${(turn.templateName ?? 'template').replace(/\s+/g, '_')}.wiki`
+		`Mapping_am-${(turn.templateName ?? 'template')
+			.replace(/\s+/g, '_')
+			.replace(/[\\/:*?"<>|]/g, '-')}.wiki`
 	);
 
 	const changeSummary = $derived(
@@ -83,6 +89,11 @@
 
 	function startEdit(row: PredictedMapping) {
 		editing = row.templateProperty;
+		// Drop any search state that was attached to a previously-edited row so
+		// the panel never reopens later with stale candidates.
+		openSearch = null;
+		searchResults = null;
+		searchError = null;
 	}
 
 	function stopEdit(row: PredictedMapping) {
@@ -114,6 +125,16 @@
 
 	// What the user typed into an unmapped field's property box.
 	let drafts = $state<Record<string, string>>({});
+
+	// A pipeline rerun or a Download+edit cycle can drop a field from
+	// `unmapped`; prune its draft so a later unrelated field reusing the
+	// same name doesn't inherit stale text.
+	$effect(() => {
+		const live = new Set(unmapped.map((f) => f.name));
+		for (const key of Object.keys(drafts)) {
+			if (!live.has(key)) delete drafts[key];
+		}
+	});
 
 	// One ontology search panel open at a time, keyed by field name. Picks
 	// come from real ontology candidates instead of a freehand guess.
@@ -180,7 +201,19 @@
 	// hand. The publish button will come back later.
 	function download() {
 		if (!canDownload) return;
-		const wikitext = buildTemplateMapping(domainClass, rows);
+		let wikitext: string;
+		try {
+			wikitext = buildTemplateMapping(domainClass, rows);
+		} catch (err) {
+			if (err instanceof UnsafeMappingValueError) {
+				// Pipe/equals/braces/newline in a value would corrupt the
+				// {{PropertyMapping}} parameter the wiki is about to parse,
+				// so refuse the download and point at the offending row.
+				toast.error(`"${err.value}" የሚል value ለማዛመጃ ፋይል ተገቢ አይደለም (${err.field})`);
+				return;
+			}
+			throw err;
+		}
 		const blob = new Blob([wikitext], { type: 'text/plain;charset=utf-8' });
 		const url = URL.createObjectURL(blob);
 		const link = document.createElement('a');
@@ -190,6 +223,9 @@
 		link.click();
 		link.remove();
 		URL.revokeObjectURL(url);
+		// Mark these rows as "the user has them on disk now" so the sidebar
+		// Clear chat warning doesn't nag about edits that are already saved.
+		turn.downloadedSnapshot = JSON.stringify(rows);
 	}
 </script>
 
@@ -276,7 +312,7 @@
 			{#if !readonly}
 				<p class="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
 					<Fa icon={faPen} class="size-2.5" />
-					ከታች ያሉት ባህርያት በሙሉ ሊታረሙ ይችላሉ። ለውጦች እስኪታተሙ ድረስ ምልክት ይደረግባቸዋል።
+					ከታች ያሉት ባህርያት በሙሉ ሊታረሙ ይችላሉ። Download እስኪያደርጉ ድረስ ለውጦች ምልክት ይደረግባቸዋል።
 				</p>
 			{/if}
 		</div>

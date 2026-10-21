@@ -1,5 +1,6 @@
 # Changelog
 
+- `fix(ui): round of fixes from code review -- reject {{TemplateMapping}} values with |/=/{{/}}/newline that would silently corrupt the file on paste; strip Windows-illegal chars from the download filename; track a per-card download snapshot so Clear chat only warns about edits made AFTER the last Download; sidebar links use rel="noopener noreferrer"; decodeURIComponent on pasted URLs so encoded reserved chars render; startEdit clears stale search state; drafts for unmapped fields are pruned when the field disappears; card header mentions Download instead of publish`
 - `feat(ui): new 'የአጠቃቀም መመሪያ' (How to use) page in Amharic with step-by-step screenshots and an Excalidraw flow diagram; the English Documentation page stays as a separate sidebar link`
 - `fix(ui): step tracker, Coverage page and sidebar footer use English nouns (infobox fields, ontology properties, run record, Extraction coverage, Templates, tab) with Amharic verbs to match project convention`
 - `feat(ui): Download button replaces Publish for now -- downloads the current (edited) {{TemplateMapping}} wikitext for the mapping; the publish backend stays wired for later`
