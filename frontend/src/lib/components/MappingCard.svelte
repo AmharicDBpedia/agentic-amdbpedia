@@ -98,6 +98,7 @@
 	function undoAll() {
 		turn.edited = original.map((row) => ({ ...row }));
 		openSearch = null;
+		editing = null;
 	}
 
 	function assign(field: string, property: string, confidence: number) {

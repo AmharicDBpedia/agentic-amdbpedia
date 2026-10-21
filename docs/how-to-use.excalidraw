@@ -1,0 +1,748 @@
+{
+ "type": "excalidraw",
+ "version": 2,
+ "source": "https://excalidraw.com",
+ "elements": [
+  {
+   "id": "t",
+   "type": "text",
+   "x": 40,
+   "y": 0,
+   "width": 201.6,
+   "height": 36.4,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1942955374,
+   "version": 1,
+   "versionNonce": 1999951810,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "የአጠቃቀም ፍሰት",
+   "originalText": "የአጠቃቀም ፍሰት",
+   "fontSize": 28,
+   "fontFamily": 1,
+   "textAlign": "left",
+   "verticalAlign": "top",
+   "containerId": null,
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "s1",
+   "type": "rectangle",
+   "x": 40,
+   "y": 70,
+   "width": 200,
+   "height": 150,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#a5d8ff",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 1940605047,
+   "version": 1,
+   "versionNonce": 815623034,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s1-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a1"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s1-t",
+   "type": "text",
+   "x": 65.12,
+   "y": 113.8,
+   "width": 149.76,
+   "height": 62.400000000000006,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 793110137,
+   "version": 1,
+   "versionNonce": 2043387527,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "1. መልዕክት ይላኩ\n(infobox፣ URL\nወይም template)",
+   "originalText": "1. መልዕክት ይላኩ\n(infobox፣ URL\nወይም template)",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s1",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "s2",
+   "type": "rectangle",
+   "x": 270,
+   "y": 70,
+   "width": 200,
+   "height": 150,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#ffec99",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 799609894,
+   "version": 1,
+   "versionNonce": 404257172,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s2-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a1"
+    },
+    {
+     "type": "arrow",
+     "id": "a2"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s2-t",
+   "type": "text",
+   "x": 306.64,
+   "y": 113.8,
+   "width": 126.72,
+   "height": 62.400000000000006,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1918102983,
+   "version": 1,
+   "versionNonce": 1303098498,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "2. Pipeline\nይሄዳል\n(5 ደረጃዎች)",
+   "originalText": "2. Pipeline\nይሄዳል\n(5 ደረጃዎች)",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s2",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "a1",
+   "type": "arrow",
+   "x": 243,
+   "y": 145,
+   "width": 24,
+   "height": 0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 609005469,
+   "version": 1,
+   "versionNonce": 389426982,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     24,
+     0
+    ]
+   ],
+   "startBinding": {
+    "elementId": "s1",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "s2",
+    "focus": 0,
+    "gap": 4
+   },
+   "endArrowhead": "arrow"
+  },
+  {
+   "id": "s3",
+   "type": "rectangle",
+   "x": 500,
+   "y": 70,
+   "width": 200,
+   "height": 150,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#d0bfff",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 179874664,
+   "version": 1,
+   "versionNonce": 1701494131,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s3-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a2"
+    },
+    {
+     "type": "arrow",
+     "id": "a3"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s3-t",
+   "type": "text",
+   "x": 513.6,
+   "y": 113.8,
+   "width": 172.79999999999998,
+   "height": 62.400000000000006,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1945598123,
+   "version": 1,
+   "versionNonce": 676431976,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "3. Mapping card\nይታያል\nለእያንዳንዱ መስክ ✓/✗",
+   "originalText": "3. Mapping card\nይታያል\nለእያንዳንዱ መስክ ✓/✗",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s3",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "a2",
+   "type": "arrow",
+   "x": 473,
+   "y": 145,
+   "width": 24,
+   "height": 0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 64427653,
+   "version": 1,
+   "versionNonce": 271291276,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     24,
+     0
+    ]
+   ],
+   "startBinding": {
+    "elementId": "s2",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "s3",
+    "focus": 0,
+    "gap": 4
+   },
+   "endArrowhead": "arrow"
+  },
+  {
+   "id": "s4",
+   "type": "rectangle",
+   "x": 730,
+   "y": 70,
+   "width": 200,
+   "height": 150,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#ffc9c9",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 255770068,
+   "version": 1,
+   "versionNonce": 153127526,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s4-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a3"
+    },
+    {
+     "type": "arrow",
+     "id": "a4"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s4-t",
+   "type": "text",
+   "x": 749.36,
+   "y": 113.8,
+   "width": 161.28,
+   "height": 62.400000000000006,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 816938252,
+   "version": 1,
+   "versionNonce": 1039137337,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "4. ያልተዛመዱ መስኮች\nይፈልጉ ወይም\nይተይቡ",
+   "originalText": "4. ያልተዛመዱ መስኮች\nይፈልጉ ወይም\nይተይቡ",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s4",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "a3",
+   "type": "arrow",
+   "x": 703,
+   "y": 145,
+   "width": 24,
+   "height": 0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 129203733,
+   "version": 1,
+   "versionNonce": 1992583343,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     24,
+     0
+    ]
+   ],
+   "startBinding": {
+    "elementId": "s3",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "s4",
+    "focus": 0,
+    "gap": 4
+   },
+   "endArrowhead": "arrow"
+  },
+  {
+   "id": "s5",
+   "type": "rectangle",
+   "x": 960,
+   "y": 70,
+   "width": 200,
+   "height": 150,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#b2f2bb",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 1401419284,
+   "version": 1,
+   "versionNonce": 1892066745,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s5-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a4"
+    },
+    {
+     "type": "arrow",
+     "id": "a6"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s5-t",
+   "type": "text",
+   "x": 973.6,
+   "y": 113.8,
+   "width": 172.79999999999998,
+   "height": 62.400000000000006,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 838898923,
+   "version": 1,
+   "versionNonce": 1003500359,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "5. Download\nየ wikitext file\nያውርዱ",
+   "originalText": "5. Download\nየ wikitext file\nያውርዱ",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s5",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "a4",
+   "type": "arrow",
+   "x": 933,
+   "y": 145,
+   "width": 24,
+   "height": 0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1263371381,
+   "version": 1,
+   "versionNonce": 2146509354,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     24,
+     0
+    ]
+   ],
+   "startBinding": {
+    "elementId": "s4",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "s5",
+    "focus": 0,
+    "gap": 4
+   },
+   "endArrowhead": "arrow"
+  },
+  {
+   "id": "s6",
+   "type": "rectangle",
+   "x": 500,
+   "y": 290,
+   "width": 320,
+   "height": 90,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#e9ecef",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 19730087,
+   "version": 1,
+   "versionNonce": 365023968,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "s6-t"
+    },
+    {
+     "type": "arrow",
+     "id": "a6"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "s6-t",
+   "type": "text",
+   "x": 433.20000000000005,
+   "y": 315.5,
+   "width": 453.59999999999997,
+   "height": 39.0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1964216888,
+   "version": 1,
+   "versionNonce": 1194700573,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "6. ለጥፉ ወደ\nmappings.dbpedia.org/Mapping am:<template>",
+   "originalText": "6. ለጥፉ ወደ\nmappings.dbpedia.org/Mapping am:<template>",
+   "fontSize": 15,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "s6",
+   "autoResize": true,
+   "lineHeight": 1.3
+  },
+  {
+   "id": "a6",
+   "type": "arrow",
+   "x": 600,
+   "y": 220,
+   "width": 0,
+   "height": 65,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 1747101363,
+   "version": 1,
+   "versionNonce": 357356203,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0,
+     0
+    ],
+    [
+     0,
+     65
+    ]
+   ],
+   "startBinding": {
+    "elementId": "s5",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "s6",
+    "focus": 0,
+    "gap": 4
+   },
+   "endArrowhead": "arrow"
+  }
+ ],
+ "appState": {
+  "viewBackgroundColor": "#ffffff",
+  "gridSize": 20
+ },
+ "files": {}
+}

@@ -12,6 +12,7 @@
 	import Fa from 'svelte-fa';
 	import {
 		faBook,
+		faBookOpen,
 		faBroom,
 		faChartSimple,
 		faChevronLeft,
@@ -52,9 +53,24 @@
 	const links = [
 		{ href: resolve('/'), label: 'ውይይት', icon: faComments, page: false },
 		{ href: resolve('/coverage'), label: 'ሽፋን', icon: faChartSimple, page: false },
-		// The static usage guide (static/documentation.html), not an app
-		// route: opens in a new tab so the chat stays put.
-		{ href: asset('/documentation.html'), label: 'የአጠቃቀም መመሪያ', icon: faBook, page: true, newTab: true }
+		// Two static pages (static/*.html), not app routes; opened in a new
+		// tab so the chat stays put. "የአጠቃቀም መመሪያ" is the step-by-step
+		// Amharic guide with screenshots; "Documentation" is the longer
+		// English concept page (DBpedia background, workflow).
+		{
+			href: asset('/how-to-use.html'),
+			label: 'የአጠቃቀም መመሪያ',
+			icon: faBook,
+			page: true,
+			newTab: true
+		},
+		{
+			href: asset('/documentation.html'),
+			label: 'Documentation',
+			icon: faBookOpen,
+			page: true,
+			newTab: true
+		}
 	];
 
 	// Clearing drops edits nobody published, so that case asks first.

@@ -81,15 +81,16 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 
 		await submitBridgeInfobox();
 
-		await waitFor(() => expect(screen.getByText('የመለጠፊያ መስኮችን ማውጣት')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('infobox fields ማውጣት')).toBeInTheDocument());
 		// Groq's class is passed on to the pipeline.
 		expect(previewSpy).toHaveBeenCalledWith(plan().text, 'Bridge');
-		await waitFor(() => expect(screen.getByDisplayValue('length')).toBeInTheDocument());
-		expect(screen.getByText('የማዛመጃ wikitext')).toBeInTheDocument();
-		expect(screen.getByText('የማዛመጃ XML')).toBeInTheDocument();
+		await waitFor(() =>
+			expect(screen.getByText('length', { selector: 'span.font-mono' })).toBeInTheDocument()
+		);
 		// The pipeline's response is only the mapping card: no Groq summary
-		// bubble, no warnings list.
+		// bubble, no warnings list, no Advanced wikitext/XML section.
 		expect(screen.queryByText(/I mapped 1 field/)).not.toBeInTheDocument();
+		expect(screen.queryByText('የማዛመጃ wikitext')).not.toBeInTheDocument();
 		expect(
 			screen.queryByText(/Skipped 3 field\(s\) already present in the published Amharic mappings/)
 		).not.toBeInTheDocument();
@@ -100,7 +101,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 
 		await submitBridgeInfobox();
-		await screen.findByDisplayValue('length');
+		await screen.findByText('length', { selector: 'span.font-mono' });
 
 		expect(screen.queryByRole('button', { name: /approve/i })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /reject/i })).not.toBeInTheDocument();
@@ -116,7 +117,10 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		const publishSpy = vi.spyOn(api, 'publishMapping');
 
 		await submitBridgeInfobox();
-		const cell = (await screen.findByDisplayValue('length')) as HTMLInputElement;
+		// New flow: pencil opens the inline editor, then the input accepts a change.
+		await screen.findByText('length', { selector: 'span.font-mono' });
+		screen.getByRole('button', { name: 'ርዝመት አርትዕ' }).click();
+		const cell = (await screen.findByLabelText('DBpedia ባህርይ ለርዝመት')) as HTMLInputElement;
 		await fireEvent.input(cell, { target: { value: 'totalLength' } });
 
 		const captured: { name: string | null; text: string | null } = { name: null, text: null };
@@ -176,7 +180,8 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 
 		(await screen.findByRole('button', { name: /depiction/i })).click();
 		await waitFor(() => {
-			expect(screen.getByLabelText('DBpedia ባህርይ ለካርታ_መግለጫ')).toHaveValue('depiction');
+			// After assign the row collapses into a regular (added) row: text, not input.
+			expect(screen.getByText('depiction', { selector: 'span.font-mono' })).toBeInTheDocument();
 			expect(screen.getByText('በእርስዎ የተጨመረ')).toBeInTheDocument();
 			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተጨምሯል');
 		});
@@ -229,10 +234,12 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 
 		await submitBridgeInfobox();
-		const cell = await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		await screen.findByText('length', { selector: 'span.font-mono' });
 		expect(screen.getByTestId('card-status')).toHaveTextContent(/^ረቂቅ$/);
-		expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
 
+		// Pencil → inline editor → change → changes counted.
+		screen.getByRole('button', { name: 'ርዝመት አርትዕ' }).click();
+		const cell = (await screen.findByLabelText('DBpedia ባህርይ ለርዝመት')) as HTMLInputElement;
 		await fireEvent.input(cell, { target: { value: 'totalLength' } });
 
 		await waitFor(() => {
@@ -244,9 +251,8 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 
 		screen.getByRole('button', { name: 'ሁሉንም መልስ' }).click();
 		await waitFor(() => {
-			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
+			expect(screen.getByText('length', { selector: 'span.font-mono' })).toBeInTheDocument();
 			expect(screen.queryByText(/የቀድሞው፦/)).not.toBeInTheDocument();
-			expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
 		});
 	});
 
@@ -254,13 +260,10 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 
 		await submitBridgeInfobox();
-		await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		await screen.findByText('length', { selector: 'span.font-mono' });
 
-		// A predicted row starts with ✓/✗; the trash can appears only after
-		// the reviewer acknowledges the prediction.
-		expect(screen.queryByRole('button', { name: 'ርዝመት አስወግድ' })).not.toBeInTheDocument();
-		screen.getByRole('button', { name: 'ርዝመት ትክክል አይደለም' }).click();
-		(await screen.findByRole('button', { name: 'ርዝመት አስወግድ' })).click();
+		// The trash can is always visible for a predicted row now.
+		screen.getByRole('button', { name: 'ርዝመት አስወግድ' }).click();
 		await waitFor(() => {
 			expect(screen.getByText('ተወግዷል፣ አይታተምም')).toBeInTheDocument();
 			expect(screen.getByTestId('card-status')).toHaveTextContent('ረቂቅ · 1 ተወግዷል');
@@ -269,7 +272,7 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 
 		screen.getByRole('button', { name: 'ርዝመት ወደነበረበት መልስ' }).click();
 		await waitFor(() => {
-			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
+			expect(screen.getByText('length', { selector: 'span.font-mono' })).toBeInTheDocument();
 			expect(screen.getByRole('button', { name: /download · 1/i })).toBeEnabled();
 		});
 	});
@@ -300,42 +303,32 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		await screen.findByText('https://am.wikipedia.org/wiki/መለጠፊያ:የሶፍትዌር_መረጃ_ሳጥን');
 	});
 
-	it('a predicted row shows ✓/✗ until the reviewer acts, then the fix tools', async () => {
+	it('a predicted row is read-only until the pencil opens the inline editor', async () => {
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 
 		await submitBridgeInfobox();
-		await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		await screen.findByText('length', { selector: 'span.font-mono' });
 
-		// Starts in "pending": ✓ and ✗ in the actions column, no search or trash.
-		const confirm = screen.getByRole('button', { name: 'ርዝመት ተረጋግጧል' });
-		expect(screen.getByRole('button', { name: 'ርዝመት ትክክል አይደለም' })).toBeInTheDocument();
+		// Collapsed state: property is text, no input, no search panel.
+		expect(screen.queryByLabelText('DBpedia ባህርይ ለርዝመት')).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: 'ለርዝመት ኦንቶሎጂውን ፈልግ' })).not.toBeInTheDocument();
-		expect(screen.queryByRole('button', { name: 'ርዝመት አስወግድ' })).not.toBeInTheDocument();
+		// Pencil (to open edit) and trash (to drop the row) are the only controls.
+		expect(screen.getByRole('button', { name: 'ርዝመት አርትዕ' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'ርዝመት አስወግድ' })).toBeInTheDocument();
 
-		// ✓ leaves a confirmed badge and gives the row a delete button (so a
-		// confirmed row can still be removed if the reviewer changes their mind).
-		confirm.click();
+		// Pencil → the input + search become reachable, and a check closes it.
+		screen.getByRole('button', { name: 'ርዝመት አርትዕ' }).click();
 		await waitFor(() => {
-			expect(screen.getByText('ተረጋግጧል')).toBeInTheDocument();
-			expect(screen.queryByRole('button', { name: 'ርዝመት ተረጋግጧል' })).not.toBeInTheDocument();
-			expect(screen.getByRole('button', { name: 'ርዝመት አስወግድ' })).toBeInTheDocument();
-		});
-	});
-
-	it('✗ on a prediction opens the ontology search for a fix', async () => {
-		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
-		const findSpy = vi
-			.spyOn(api, 'findSemanticMatch')
-			.mockResolvedValue({ status: 'ok', matches: [] });
-
-		await submitBridgeInfobox();
-		await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
-
-		screen.getByRole('button', { name: 'ርዝመት ትክክል አይደለም' }).click();
-		await waitFor(() => {
-			expect(findSpy).toHaveBeenCalledWith('ርዝመት', 'Bridge');
+			expect(screen.getByLabelText('DBpedia ባህርይ ለርዝመት')).toHaveValue('length');
 			expect(screen.getByRole('button', { name: 'ለርዝመት ኦንቶሎጂውን ፈልግ' })).toBeInTheDocument();
-			expect(screen.getByRole('button', { name: 'ርዝመት አስወግድ' })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: 'ርዝመት አርትዖትን ጨርስ' })).toBeInTheDocument();
+		});
+
+		// Closing the editor marks the row as reviewed.
+		screen.getByRole('button', { name: 'ርዝመት አርትዖትን ጨርስ' }).click();
+		await waitFor(() => {
+			expect(screen.queryByLabelText('DBpedia ባህርይ ለርዝመት')).not.toBeInTheDocument();
+			expect(screen.getByText('ተረጋግጧል')).toBeInTheDocument();
 		});
 	});
 
@@ -343,14 +336,16 @@ describe('chat: Groq in, pipeline, Groq out, edit and download in place', () => 
 		vi.spyOn(api, 'previewMapping').mockReturnValue(fakeStream());
 
 		await submitBridgeInfobox();
-		const cell = await screen.findByLabelText('DBpedia ባህርይ ለርዝመት');
+		await screen.findByText('length', { selector: 'span.font-mono' });
+		screen.getByRole('button', { name: 'ርዝመት አርትዕ' }).click();
+		const cell = (await screen.findByLabelText('DBpedia ባህርይ ለርዝመት')) as HTMLInputElement;
 		await fireEvent.input(cell, { target: { value: 'len' } });
 		await fireEvent.input(cell, { target: { value: 'length' } });
 
 		await waitFor(() => {
 			expect(cell.closest('tr')).toHaveAttribute('data-change', 'none');
 			expect(screen.getByText('75%')).toBeInTheDocument();
-			expect(screen.getByText('እስካሁን ምንም ለውጥ የለም')).toBeInTheDocument();
+			expect(screen.getByTestId('card-status')).toHaveTextContent(/^ረቂቅ$/);
 		});
 	});
 });

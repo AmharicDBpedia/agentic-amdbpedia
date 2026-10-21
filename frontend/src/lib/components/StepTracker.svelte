@@ -7,11 +7,11 @@
 	let { steps, finished = false }: { steps: AgentStep[]; finished?: boolean } = $props();
 
 	const stepLabels: Record<string, string> = {
-		fetch_source_article: 'የዊኪፔዲያ መለጠፊያን ማምጣት',
-		extract_infobox_fields: 'የመለጠፊያ መስኮችን ማውጣት',
-		predict_properties: 'የኦንቶሎጂ ባህርያትን መተንበይ',
-		format_mapping_syntax: 'የማዛመጃ XML ማመንጨት',
-		persist_review_item: 'የሂደት መዝገብ ማስቀመጥ'
+		fetch_source_article: 'Wikipedia source ማምጣት',
+		extract_infobox_fields: 'infobox fields ማውጣት',
+		predict_properties: 'ontology properties መተንበይ',
+		format_mapping_syntax: 'mapping XML ማመንጨት',
+		persist_review_item: 'run record ማስቀመጥ'
 	};
 
 	const failed = $derived(steps.some((step) => step.status === 'error'));
@@ -46,7 +46,7 @@
 				class="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
 			>
 				<Fa icon={faCircleCheck} class="size-3 text-success" />
-				በ{steps.length} ደረጃዎች ተጠናቋል
+				{steps.length} steps ተጠናቋል
 				<span class="group-open:hidden">· አሳይ</span>
 			</summary>
 			<div class="mt-2.5 pl-1">{@render list()}</div>

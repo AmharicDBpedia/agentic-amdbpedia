@@ -81,8 +81,8 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 		// has to know this node name or it would fall back to the raw
 		// "fetch_source_article" node string instead.
 		await waitFor(() => {
-			expect(screen.getByText('የዊኪፔዲያ መለጠፊያን ማምጣት')).toBeInTheDocument();
-			expect(screen.getByDisplayValue('river')).toBeInTheDocument();
+			expect(screen.getByText('Wikipedia source ማምጣት')).toBeInTheDocument();
+			expect(screen.getByText('river', { selector: 'span.font-mono' })).toBeInTheDocument();
 		});
 	});
 
@@ -122,7 +122,7 @@ describe('extracting an infobox from a Wikipedia link, in the chat', () => {
 		screen.getByRole('button', { name: 'ላክ' }).click();
 
 		await waitFor(() => {
-			expect(screen.getByText('የዊኪፔዲያ መለጠፊያን ማምጣት')).toBeInTheDocument();
+			expect(screen.getByText('Wikipedia source ማምጣት')).toBeInTheDocument();
 			expect(screen.getByText(/404: Not Found/)).toBeInTheDocument();
 		});
 	});

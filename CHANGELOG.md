@@ -1,5 +1,7 @@
 # Changelog
 
+- `feat(ui): new 'የአጠቃቀም መመሪያ' (How to use) page in Amharic with step-by-step screenshots and an Excalidraw flow diagram; the English Documentation page stays as a separate sidebar link`
+- `fix(ui): step tracker, Coverage page and sidebar footer use English nouns (infobox fields, ontology properties, run record, Extraction coverage, Templates, tab) with Amharic verbs to match project convention`
 - `feat(ui): Download button replaces Publish for now -- downloads the current (edited) {{TemplateMapping}} wikitext for the mapping; the publish backend stays wired for later`
 - `feat(ui): decode percent-encoded Amharic in Wikipedia URLs when echoing the user's message back`
 - `feat(ui): remove the class chip from the composer -- Groq infers the DBpedia class from the message`
