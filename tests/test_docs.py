@@ -1,3 +1,11 @@
+"""Documentation contract: the project's substantive technical commitments
+have to live somewhere canonical in the repo, and the traceability matrix
+has to point at tests that actually exist. Which *file* holds the content
+is intentionally flexible so the README can stay short; the fragments just
+have to be present in the project docs (README + docs/*.md) taken
+together.
+"""
+
 from __future__ import annotations
 
 import re
@@ -6,8 +14,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_readme_required_sections_and_domain_language() -> None:
-    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+def _project_docs() -> str:
+    """README plus every top-level docs/*.md, concatenated. The exact
+    distribution across files is a style choice; the technical commitments
+    below are the thing we actually test for."""
+    parts: list[str] = []
+    parts.append((PROJECT_ROOT / "README.md").read_text(encoding="utf-8"))
+    for md in sorted((PROJECT_ROOT / "docs").glob("*.md")):
+        parts.append(md.read_text(encoding="utf-8"))
+    return "\n\n".join(parts)
+
+
+def test_project_docs_record_domain_and_architecture_commitments() -> None:
+    docs = _project_docs()
     required_fragments = [
         "## Domain",
         "## Architecture",
@@ -20,7 +39,7 @@ def test_readme_required_sections_and_domain_language() -> None:
         "MCP tools are required",
         "deterministic",
     ]
-    missing = [fragment for fragment in required_fragments if fragment not in readme]
+    missing = [fragment for fragment in required_fragments if fragment not in docs]
     assert missing == []
 
 
@@ -39,8 +58,11 @@ def test_demo_transcripts_cover_required_paths() -> None:
 
 
 def test_traceability_matrix_entries_reference_existing_tests() -> None:
-    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
-    references = re.findall(r"`(tests/[^`]+::test_[^`]+)`", readme)
+    """The traceability matrix (now in docs/traceability.md) must only cite
+    tests that actually exist in the suite -- otherwise the matrix is a
+    silent lie."""
+    matrix = (PROJECT_ROOT / "docs" / "traceability.md").read_text(encoding="utf-8")
+    references = re.findall(r"`(tests/[^`]+::test_[^`]+)`", matrix)
 
     assert references
     for reference in references:

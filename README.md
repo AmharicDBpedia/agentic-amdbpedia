@@ -134,6 +134,7 @@ run, so they need network access.
 
 ## Documentation
 
+- [`docs/architecture.md`](docs/architecture.md) — longer architecture notes, domain, retrieval, Groq, LLM chain, future work
 - [`implementation.md`](implementation.md) — roadmap and implementation detail
 - [`examples/demo.md`](examples/demo.md) — complete demo transcripts
 - [`frontend/README.md`](frontend/README.md) — routes and API contracts
