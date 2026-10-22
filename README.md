@@ -184,6 +184,36 @@ pnpm run dev --open
 The frontend expects the API at `http://localhost:8001`. Set
 `PUBLIC_CROSS_LINGUAL_URL` in `frontend/.env` if the API uses another port.
 
+## Docker Compose
+
+The default Compose stack builds and runs the production backend and frontend
+with PostgreSQL. Put `GROQ_API_KEY` in the root `.env`, then run:
+
+```bash
+docker compose build backend frontend
+docker compose up -d
+```
+
+Open `http://localhost:3000`; the API is published on
+`http://localhost:8001`. The backend's generated data and model cache are kept
+in the `backend_data` volume, while PostgreSQL uses `postgres_data`.
+
+The default container configuration uses Groq directly and does not start
+Ollama. Ollama and Tentris are optional Compose profiles:
+
+```bash
+docker compose --profile local-llm up -d ollama
+docker compose --profile qa up -d tentris
+```
+
+For a remote deployment, set `PUBLIC_CROSS_LINGUAL_URL` to the browser-visible
+API URL before starting the stack. Stop the stack with `docker compose down`;
+add `--volumes` only when you intentionally want to erase its persisted data.
+
+The locally built images are tagged `agentic-amdbpedia-backend:local` and
+`agentic-amdbpedia-frontend:local`. Retag those names for your container
+registry before pushing them.
+
 ## Using the application
 
 The interface is in Amharic. Open http://localhost:5173.

@@ -1,0 +1,7 @@
+# Use the published ARM64 images instead of local builds.
+services:
+  backend:
+    image: hizclick/agentic-amdbpedia-backend:arm64
+
+  frontend:
+    image: hizclick/agentic-amdbpedia-frontend:arm64
