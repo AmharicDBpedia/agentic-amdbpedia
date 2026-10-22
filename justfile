@@ -34,3 +34,14 @@ refresh-ontology:
 
 refresh-mappings:
     uv run --frozen --no-dev --python 3.11 python scripts/refresh_wiki_cache.py --target mappings
+
+# Cut a release: bump the version in pyproject.toml and
+# frontend/package.json, commit, tag v<VERSION>, push the tag. The
+# release workflow (.github/workflows/release.yml) picks it up from
+# there -- builds multi-arch images, pushes to ghcr.io and creates the
+# GitHub Release with docker-compose.release.yml attached.
+#
+# Usage: just release 0.2.0
+release VERSION:
+    uv run --no-sync --python 3.11 python scripts/cut_release.py {{VERSION}}
+    git push origin main "v{{VERSION}}"

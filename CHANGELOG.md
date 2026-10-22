@@ -1,5 +1,6 @@
 # Changelog
 
+- `feat(release): tagged releases publish multi-arch Docker images to ghcr.io/amharicdbpedia/agentic-amdbpedia-{backend,frontend} and attach a ready-to-run docker-compose.release.yml to the GitHub Release; new .github/workflows/release.yml and "just release X.Y.Z" recipe to cut one`
 - `feat(ui): new 'የአጠቃቀም መመሪያ' (How to use) page in Amharic with step-by-step screenshots and an Excalidraw flow diagram; the English Documentation page stays as a separate sidebar link`
 - `fix(ui): step tracker, Coverage page and sidebar footer use English nouns (infobox fields, ontology properties, run record, Extraction coverage, Templates, tab) with Amharic verbs to match project convention`
 - `feat(ui): Download button replaces Publish for now -- downloads the current (edited) {{TemplateMapping}} wikitext for the mapping; the publish backend stays wired for later`

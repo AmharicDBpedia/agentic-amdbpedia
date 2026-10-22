@@ -214,6 +214,48 @@ The locally built images are tagged `agentic-amdbpedia-backend:local` and
 `agentic-amdbpedia-frontend:local`. Retag those names for your container
 registry before pushing them.
 
+## Releases
+
+Every tagged release (`vX.Y.Z`) publishes multi-arch (linux/amd64 +
+linux/arm64) container images to the GitHub Container Registry and attaches
+a ready-to-run compose file to the GitHub Release. End users don't need the
+source tree; they only need Docker.
+
+### Run a published release
+
+```bash
+curl -LO https://github.com/AmharicDBpedia/agentic-amdbpedia/releases/latest/download/docker-compose.release.yml
+cp .env.example .env   # add GROQ_API_KEY and optionally bot credentials
+TAG=v0.1.0 docker compose -f docker-compose.release.yml up -d
+```
+
+The frontend serves on `http://localhost:3000`, the API on
+`http://localhost:8001`. Pin a specific `vX.Y.Z` for anything you'll come
+back to; `latest` works for a one-off look but will drift.
+
+Published images:
+
+- `ghcr.io/amharicdbpedia/agentic-amdbpedia-backend:<version>`
+- `ghcr.io/amharicdbpedia/agentic-amdbpedia-frontend:<version>`
+
+### Cut a release
+
+From a clean `main` working tree:
+
+```bash
+just release 0.2.0
+```
+
+The recipe bumps `pyproject.toml` + `frontend/package.json`, prepends a
+`## [v0.2.0]` section to `CHANGELOG.md`, commits, tags `v0.2.0` and pushes
+both the commit and the tag. The `release` workflow
+(`.github/workflows/release.yml`) then builds the two images for both
+architectures, pushes them with `:v0.2.0` and `:latest` tags, and opens a
+GitHub Release with the matching CHANGELOG section as the notes.
+
+Edit the `## [v0.2.0]` section before (or straight after) running the
+recipe so the release notes read well; the workflow pulls them verbatim.
+
 ## Using the application
 
 The interface is in Amharic. Open http://localhost:5173.
