@@ -1,227 +1,30 @@
 # agentic-amdbpedia
 
-An AI-assisted workflow for mapping Amharic Wikipedia infobox fields to the
-English DBpedia ontology.
-
-The project combines hybrid retrieval, a local LLM (Gemma 2 9B via Ollama), Groq
-for understanding the user's message and writing the reply, MCP tools, and a
-SvelteKit chat in Amharic. It proposes ontology mappings, lets you edit them in
-the chat with every change marked, generates deterministic MediaWiki syntax,
-and publishes only when you press Publish and confirm.
-
-## Domain
-
-This project supports **cross-lingual semantic web engineering** between
-**Amharic Wikipedia** and the **English DBpedia ontology**. It helps editors find
-schema-specific properties such as `length`, `openingDate`, and IATA or ICAO
-identifiers without relying on literal translation alone.
-
-Retrieval-augmented generation is required because ontology properties are
-specialized and must be grounded in the real DBpedia schema.
-**MCP tools are required** to expose that retrieval safely and to generate
-deterministic mapping syntax instead of letting a language model invent XML.
-
-## What it provides
-
-- Hybrid dense and sparse search across roughly 2,948 DBpedia properties
-- Amharic aliases enriched from published DBpedia mappings
-- A four-step infobox pipeline: extract, predict, format, and save a run record
-- Input as infobox wikitext, an am.wikipedia.org article link, a template page
-  link (`መለጠፊያ:…`), or a single field name
-- A SvelteKit chat with an Amharic interface: one conversation per browser
-  tab, a mapping card that marks every edit, publishing from the chat, a
-  coverage page, and a usage guide
-- MCP tools for semantic matching and deterministic XML generation
-- Optional, consent-gated publication to `mappings.dbpedia.org`
-- Evaluation, integration, end-to-end, and performance test suites
+Map Amharic Wikipedia infobox fields to the English DBpedia ontology. Hybrid
+retrieval over the real ontology, a local LLM (Gemma 2 9B via Ollama) with
+Groq fallback, MCP tools, and a SvelteKit chat in Amharic. The chat proposes
+mappings, lets you edit each row, and downloads the finished
+`{{TemplateMapping}}` wikitext for `mappings.dbpedia.org`.
 
 ## Architecture
 
-![Architecture: the SvelteKit frontend talks to the HTTP API, which uses Groq before and after the LangGraph pipeline; the pipeline checks learned aliases, then hybrid retrieval, then the LLM (Gemma via Ollama, Groq fallback); Publish writes to mappings.dbpedia.org](docs/architecture.svg)
+![Architecture: SvelteKit frontend → HTTP API; Groq reads the message and writes the reply; the LangGraph pipeline runs extract → predict → format → save; retrieval merges dense + BM25 with learned aliases, then the LLM reranks or proposes; results land in the mapping card.](docs/architecture.svg)
 
-The diagram is an Excalidraw scene: open
-[`docs/architecture.excalidraw`](docs/architecture.excalidraw) at
-[excalidraw.com](https://excalidraw.com) to edit it, then export it over
-`docs/architecture.svg`.
+A message takes five steps: Groq reads it (`/v1/assist/understand`), a link
+is fetched if needed, the pipeline extracts fields → predicts properties →
+formats the wikitext → saves a run record (`/v1/preview`, streamed), Groq
+writes the Amharic reply (`/v1/assist/summarize`), and the mapping card
+appears. Download writes the current rows as `{{TemplateMapping}}`
+wikitext; publishing to the live wiki (`/v1/publish`) is implemented but
+disabled in the UI for now.
 
-A message goes through these steps:
+Retrieval is local (dense + BM25 with reciprocal rank fusion over ~2,948
+properties). On a confident hit the LLM reranks; otherwise it proposes a
+property checked against the real ontology, with "none" as an option. Picks
+are labelled **AI-proposed** in the UI. Downloaded (or published) rows
+become learned aliases on the next request.
 
-1. **Groq reads it** (`/v1/assist/understand`): an infobox, a Wikipedia link,
-   or a field inside a question, and which DBpedia class it belongs to.
-2. **A link is fetched** from am.wikipedia.org. For a template page, the
-   template's declared parameters are mapped directly.
-3. **The pipeline runs** (`/v1/preview`, streamed over SSE): extract the
-   fields, predict a property for each, format the mapping syntax, and save a
-   run record.
-4. **Groq writes the reply** in Amharic (`/v1/assist/summarize`), and the
-   result appears as an editable mapping card.
-5. **Publish** (`/v1/publish`) writes the edited rows to
-   `Mapping am:<template>` on mappings.dbpedia.org after you confirm. The
-   published rows become learned aliases for the next request.
-
-Retrieval runs locally and merges semantic and lexical rankings using reciprocal
-rank fusion. When it finds a confident match, the LLM reranks the candidates
-with the target class in view. When it doesn't, which is the usual case for
-Amharic vocabulary not yet in the corpus, the LLM first proposes a property,
-checked against the real ontology. If it declines, the LLM picks among the
-dense model's unverified top 10, with "none" as an explicit option. Either
-way, the result is labelled **AI-proposed** in the UI, and fields that stay
-unmapped show their closest suggestions for a reviewer to pick from.
-Published mappings are saved per class in `data/learned_aliases.json` and used
-before retrieval on the next request.
-
-### Groq: understanding the message and writing the reply
-
-Groq does the two language jobs around the mapping, never the mapping itself:
-
-- **Before:** it reads what you typed and decides what to run. That's an
-  infobox, a Wikipedia link, or a single field pulled out of a question like
-  "የጋዜጣ ዋና_አዘጋጅ በDBpedia ምን ይባላል?" (field `ዋና_አዘጋጅ`, class
-  `Newspaper`). It also infers the DBpedia class from an infobox's template
-  name. A class is only used if it really exists in the ontology, and a field
-  only if you actually typed it. Prompt-injection text never reaches Groq.
-- **After:** it turns the result into a short reply in Amharic: what
-  mapped, what the AI model suggested and should be checked, and what is still
-  unmapped with the closest suggestions. A reply that names a property not in
-  the result is discarded and replaced by a plain summary.
-
-If Groq is unavailable, simple local rules take over for both steps.
-
-### Language model
-
-Every LLM call tries the models in order:
-
-1. `PREDICT_MODEL`, by default the local **Gemma 2 9B via Ollama**.
-2. `PREDICT_FALLBACK_MODEL`, by default `groq/<GROQ_MODEL_FAST>` using your
-   `GROQ_API_KEY`. It's used whenever Ollama isn't running or times out. Set
-   it to `none` to run local-only.
-
-To run Gemma locally with Docker (no system install needed):
-
-```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull gemma2:9b   # ~5.4 GB, once; kept in a volume
-```
-
-The container publishes Ollama on `localhost:11434`, which is where LiteLLM
-looks by default, so no extra configuration is needed. You can also install
-Ollama natively instead (`sudo dnf install ollama`, then `ollama serve` and
-`ollama pull gemma2:9b`).
-
-Without a GPU, Gemma 2 9B needs several seconds per answer, so
-`PREDICT_LLM_TIMEOUT_SECONDS` defaults to 60. It also needs about 6.3 GB of
-free RAM. On a machine with less, make Groq the mapping model instead:
-
-```bash
-env -u GROQ_API_KEY PREDICT_MODEL=groq/qwen/qwen3.8-27b PREDICT_FALLBACK_MODEL=none just run-http
-``` If neither model can be reached,
-the result says so (`llm_error`) instead of reporting "no such property".
-
-> **Stale keys:** an exported shell variable takes precedence over `.env`.
-> If `GROQ_API_KEY` is also exported in `~/.zshrc` or `~/.bashrc`, that copy
-> is used. An old key there fails with `expired_api_key`.
-
-The HTTP API streams pipeline progress over server-sent events. SQLite is used
-by default; PostgreSQL is available through Docker Compose. Publishing is
-disabled unless MediaWiki bot credentials and explicit consent are provided.
-
-## Quick start
-
-### Prerequisites
-
-- Python 3.11
-- [uv](https://docs.astral.sh/uv/)
-- Node.js and pnpm
-- Docker, only if you want PostgreSQL
-- A Groq API key (agent features, and the LLM fallback when Ollama isn't running)
-- Optional: [Ollama](https://ollama.com) with `gemma2:9b` for local LLM calls
-
-### 1. Configure the project
-
-```bash
-cp .env.example .env
-```
-
-Add your `GROQ_API_KEY` to `.env`. To use local SQLite, remove or leave
-`DATABASE_URL` unset. To use PostgreSQL, keep the example value and start it:
-
-```bash
-docker compose up -d postgres
-```
-
-### 2. Start the API
-
-```bash
-uv sync --frozen --python 3.11
-just run-http
-```
-
-The API starts at `http://localhost:8001`. If that port is occupied, the runner
-selects the next available port and prints it.
-
-The first startup downloads the embedding models and builds the local ontology
-index. Later starts reuse the cache in `data/.cache/`.
-
-### 3. Start Ollama (optional)
-
-```bash
-docker compose up -d ollama
-docker compose exec ollama ollama pull gemma2:9b   # once
-```
-
-Without Ollama, every LLM call falls back to Groq.
-
-### 4. Start the frontend
-
-In another terminal:
-
-```bash
-cd frontend
-pnpm install
-pnpm run dev --open
-```
-
-The frontend expects the API at `http://localhost:8001`. Set
-`PUBLIC_CROSS_LINGUAL_URL` in `frontend/.env` if the API uses another port.
-
-## Docker Compose
-
-The default Compose stack builds and runs the production backend and frontend
-with PostgreSQL. Put `GROQ_API_KEY` in the root `.env`, then run:
-
-```bash
-docker compose build backend frontend
-docker compose up -d
-```
-
-Open `http://localhost:3000`; the API is published on
-`http://localhost:8001`. The backend's generated data and model cache are kept
-in the `backend_data` volume, while PostgreSQL uses `postgres_data`.
-
-The default container configuration uses Groq directly and does not start
-Ollama. Ollama and Tentris are optional Compose profiles:
-
-```bash
-docker compose --profile local-llm up -d ollama
-docker compose --profile qa up -d tentris
-```
-
-For a remote deployment, set `PUBLIC_CROSS_LINGUAL_URL` to the browser-visible
-API URL before starting the stack. Stop the stack with `docker compose down`;
-add `--volumes` only when you intentionally want to erase its persisted data.
-
-The locally built images are tagged `agentic-amdbpedia-backend:local` and
-`agentic-amdbpedia-frontend:local`. Retag those names for your container
-registry before pushing them.
-
-## Releases
-
-Every tagged release (`vX.Y.Z`) publishes multi-arch (linux/amd64 +
-linux/arm64) container images to the GitHub Container Registry and attaches
-a ready-to-run compose file to the GitHub Release. End users don't need the
-source tree; they only need Docker.
-
-### Run a published release
+## Run a published release
 
 ```bash
 curl -LO https://github.com/AmharicDBpedia/agentic-amdbpedia/releases/latest/download/docker-compose.release.yml
@@ -229,143 +32,116 @@ cp .env.example .env   # add GROQ_API_KEY and optionally bot credentials
 TAG=v0.1.0 docker compose -f docker-compose.release.yml up -d
 ```
 
-The frontend serves on `http://localhost:3000`, the API on
-`http://localhost:8001`. Pin a specific `vX.Y.Z` for anything you'll come
-back to; `latest` works for a one-off look but will drift.
+Frontend at `http://localhost:3000`, API at `http://localhost:8001`. Pin a
+`vX.Y.Z` for anything you'll come back to; `latest` drifts. Images live at
+`ghcr.io/amharicdbpedia/agentic-amdbpedia-{backend,frontend}` and ship for
+`linux/amd64` and `linux/arm64`.
 
-Published images:
+## Run from source
 
-- `ghcr.io/amharicdbpedia/agentic-amdbpedia-backend:<version>`
-- `ghcr.io/amharicdbpedia/agentic-amdbpedia-frontend:<version>`
+Prerequisites: Python 3.11, [uv](https://docs.astral.sh/uv/), Node.js +
+pnpm, Docker (for PostgreSQL and the published Ollama image), a Groq API
+key. Optional: a local Ollama install with `gemma2:9b`.
 
-### Cut a release
+```bash
+cp .env.example .env         # set GROQ_API_KEY; keep DATABASE_URL for Postgres
+docker compose up -d postgres
+just run-http                # API on :8001
+# in another terminal
+cd frontend && pnpm install && pnpm run dev --open   # UI on :5173
+```
 
-From a clean `main` working tree:
+First startup downloads the embedding models and builds the ontology index
+in `data/.cache/`. On a machine with less than ~7 GB of free RAM, skip
+Ollama and run Groq-only:
+
+```bash
+env -u GROQ_API_KEY PREDICT_MODEL=groq/qwen/qwen3.8-27b PREDICT_FALLBACK_MODEL=none just run-http
+```
+
+Local Gemma, opt-in:
+
+```bash
+docker compose --profile local-llm up -d ollama
+docker compose exec ollama ollama pull gemma2:9b   # ~5.4 GB, once
+```
+
+Set `PREDICT_MODEL=gemma2` once Ollama is up. An exported `GROQ_API_KEY` in
+`~/.zshrc` or `~/.bashrc` takes precedence over `.env` and will fail with
+`expired_api_key` if stale, hence the `env -u` dropper above.
+
+## Using the app
+
+The UI is in Amharic.
+
+- Paste **infobox wikitext**, an **am.wikipedia.org link**, a **template
+  link** (e.g. `https://am.wikipedia.org/wiki/መለጠፊያ:የምግብ_መረጃ`), or a
+  single **field name**.
+- Each row has a **pencil** (edit) and a **trash** (drop) button. Edit
+  opens an inline input + ontology search; confirming marks the row
+  **ተረጋግጧል**. Edited rows get an amber bar, added rows green, removed
+  rows stay struck through until you restore them.
+- The footer shows the change count and **ሁሉንም መልስ** (undo all).
+  **Download** saves the current rows as `Mapping_am-<template>.wiki`.
+- The chat is per browser tab (sessionStorage). **ውይይቱን አጽዳ** (Clear
+  chat) warns about edits that have not been downloaded yet.
+
+> Publishing to `mappings.dbpedia.org` from the UI currently fails with
+> `writeapidenied`: that wiki denies the `writeapi` right to anonymous
+> users, so every API login is refused. Download → paste by hand until a
+> wiki admin restores the MediaWiki default
+> `$wgGroupPermissions['*']['writeapi'] = true;`.
+
+## Cut a release
+
+From a clean `main`:
 
 ```bash
 just release 0.2.0
+git push origin main v0.2.0
 ```
 
-The recipe bumps `pyproject.toml` + `frontend/package.json`, prepends a
-`## [v0.2.0]` section to `CHANGELOG.md`, commits, tags `v0.2.0` and pushes
-both the commit and the tag. The `release` workflow
-(`.github/workflows/release.yml`) then builds the two images for both
-architectures, pushes them with `:v0.2.0` and `:latest` tags, and opens a
-GitHub Release with the matching CHANGELOG section as the notes.
-
-Edit the `## [v0.2.0]` section before (or straight after) running the
-recipe so the release notes read well; the workflow pulls them verbatim.
-
-## Using the application
-
-The interface is in Amharic. Open http://localhost:5173.
-
-- **Send a message:** paste infobox wikitext, an am.wikipedia.org article
-  link, a template link such as
-  `https://am.wikipedia.org/wiki/መለጠፊያ:የምግብ_መረጃ`, or a field name or
-  question. To fix the DBpedia class, set the **ክፍል፦ ራስ-ሰር** chip next to
-  the send button (for example `Zoo`); otherwise Groq infers it.
-- **Edit the mapping card:** every infobox field is a row, and every
-  property is an editable box with an ontology search beside it.
-  - Edited rows get an amber bar and show the original property with
-    **መልስ** (undo).
-  - Added rows get a green bar.
-  - Removed rows stay struck through until you restore them.
-  - AI-proposed rows say **ያረጋግጡ** (check this).
-  - Unmapped fields are empty rows with the closest suggestions.
-  - The header counts the changes (**ረቂቅ · 1 ታርሟል**), and **ሁሉንም መልስ**
-    undoes them all.
-- **Publish:** press **Publish**, review the before → after list, and
-  confirm. The rows are written to `Mapping am:<template>` on
-  mappings.dbpedia.org.
-- **Chat history:** the chat is kept in the browser tab only. A reload keeps
-  it, closing the tab removes it, and **ውይይቱን አጽዳ** in the sidebar starts
-  over (it asks first if edits are unpublished).
-- **Sidebar:** open **ሽፋን** for published template coverage and
-  **የአጠቃቀም መመሪያ** for the usage guide (`frontend/static/documentation.html`).
-
-Publishing is never automatic. It needs the confirmation in the chat, and
-`.env` must contain a MediaWiki bot username (`User@BotName`) and bot password
-from `Special:BotPasswords`. Never use your normal MediaWiki account password.
-
-> **Publishing to mappings.dbpedia.org currently fails** with
-> `writeapidenied`. That wiki denies the `writeapi` right to anonymous users,
-> so every API login is refused, whatever the bot's grants. A wiki admin has
-> to restore the MediaWiki default `$wgGroupPermissions['*']['writeapi'] = true;`.
-
-Worked inputs and expected responses are available in
-[`examples/demo.md`](examples/demo.md).
+That bumps `pyproject.toml` + `frontend/package.json`, prepends a
+`## [v0.2.0]` section to `CHANGELOG.md`, commits, and tags. The release
+workflow (`.github/workflows/release.yml`) builds and pushes multi-arch
+images, then opens a GitHub Release with that CHANGELOG section as the
+notes and `docker-compose.release.yml` attached.
 
 ## MCP server
 
-Start the MCP server with:
-
 ```bash
-just run-server
+just run-server                                         # stdio MCP server
+uv run python scripts/print_desktop_config.py           # Claude Desktop block
 ```
 
-Generate a credential-free Claude Desktop configuration block with:
-
-```bash
-uv run python scripts/print_desktop_config.py
-```
-
-The server exposes:
-
-- `find_semantic_match`
-- `generate_mapping_syntax`
-- `resources://benchmarks/latest`
-
-Keep credentials in the ignored project `.env`, not in the desktop client
-configuration.
+Tools: `find_semantic_match`, `generate_mapping_syntax`,
+`resources://benchmarks/latest`. Credentials stay in `.env`, not in the
+desktop config.
 
 ## Common commands
 
 ```bash
-just test              # Fast unit tests
-just lint              # Ruff, formatting, and strict mypy
-just test-integration  # Real-model integration tests
-just test-e2e          # Full pipeline tests
-just test-perf         # Latency checks
-just validate-corpus   # Validate ontology documents
+just test              # fast unit tests
+just lint              # ruff + strict mypy
+just test-integration  # real-model integration tests
+just test-e2e          # full pipeline tests
+just test-perf         # latency checks
+just validate-corpus   # ontology data sanity
 ```
 
-Integration and end-to-end tests download real embedding models on their first
-run and therefore require network access.
+Integration and end-to-end runs download real embedding models on first
+run, so they need network access.
 
 ## Documentation
 
 - [`implementation.md`](implementation.md) — roadmap and implementation detail
 - [`examples/demo.md`](examples/demo.md) — complete demo transcripts
-- [`docs/architecture.excalidraw`](docs/architecture.excalidraw) — the architecture diagram (Excalidraw source)
-- [`frontend/README.md`](frontend/README.md) — frontend routes and API contracts
-- [`frontend/static/documentation.html`](frontend/static/documentation.html) — the usage guide shown in the app
+- [`frontend/README.md`](frontend/README.md) — routes and API contracts
+- [`frontend/static/how-to-use.html`](frontend/static/how-to-use.html) — in-app Amharic usage guide
+- [`frontend/static/documentation.html`](frontend/static/documentation.html) — in-app English concept guide
 - [`corpus-refresh.md`](corpus-refresh.md) — refreshing ontology and mapping data
 - [`evaluation/results.md`](evaluation/results.md) — retrieval evaluation results
-- [`CHANGELOG.md`](CHANGELOG.md) — notable project changes
+- [`CHANGELOG.md`](CHANGELOG.md) — notable changes
 
-## Requirements Traceability
-
-The automated suite links the main system boundaries to executable evidence.
-Representative checks include:
-
-| Capability | Verification |
-|---|---|
-| Hybrid ontology retrieval | `tests/test_retrieval.py::test_search_finds_exact_alias_match_via_sparse_channel` |
-| MCP semantic search | `tests/test_mcp_server.py::test_find_semantic_match_happy_path` |
-| End-to-end pipeline | `tests/test_pipeline_orchestration.py::test_full_pipeline_end_to_end_produces_a_pending_review_row_with_length_predicted` |
-| Publish from the chat | `tests/test_http_pipeline_routes.py::test_publish_route_publishes_and_learns` |
-| Groq input/output layer | `tests/test_assistant.py` |
-| Consent-gated publishing | `tests/test_publish.py::test_publish_is_refused_without_consent` |
-| Prompt-injection guardrail | `tests/test_agent.py::test_injection_classifier_catches_known_patterns` |
-
-Run `just test`, `just test-integration`, and `just test-e2e` for the complete
-verification suite.
-
-## Future Work
-
-- Expand the Amharic alias corpus and evaluation set.
-- Add authentication and authorization before exposing the publish endpoint beyond localhost.
-- Automate post-publication DBpedia extraction and verification.
-- Fine-tune the reranker from published and corrected mappings.
-- Package the services for production deployment.
+Traceability lives in [`docs/traceability.md`](docs/traceability.md); the
+automated suites link the main system boundaries to executable evidence.
