@@ -1,0 +1,119 @@
+name: Release
+
+# Cuts a release from a `vX.Y.Z` tag:
+#   1. multi-arch (linux/amd64, linux/arm64) Docker images for backend and
+#      frontend, pushed to ghcr.io/amharicdbpedia/agentic-amdbpedia-* with
+#      both `:vX.Y.Z` and `:latest` tags
+#   2. a GitHub Release with notes auto-generated from CHANGELOG.md and the
+#      ready-to-run `docker-compose.release.yml` attached
+#
+# Trigger: push a tag matching `v*`. See `just release VERSION` for the
+# tag workflow.
+
+on:
+  push:
+    tags: ["v*"]
+  # Allow a dry-run from the Actions UI without producing a real release.
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to build (ghcr tag will be `edge`)"
+        required: false
+        default: "main"
+
+permissions:
+  contents: write # the `release` job writes the GitHub Release
+  packages: write # buildx pushes to GitHub Container Registry
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: .
+            dockerfile: Dockerfile
+          - name: frontend
+            context: ./frontend
+            dockerfile: Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # `metadata-action` fills in :vX.Y.Z + :latest for a tag push, or
+      # :edge for a manual dispatch, so the same workflow serves both.
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/amharicdbpedia/agentic-amdbpedia-${{ matrix.name }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_dispatch' }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.context }}/${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  release:
+    runs-on: ubuntu-latest
+    # A manual dispatch builds the images but does NOT create a GitHub
+    # Release -- that's reserved for `v*` tags.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: images
+    steps:
+      - uses: actions/checkout@v4
+      # Pull just the "## [vX.Y.Z]" section (the one being released) out of
+      # CHANGELOG.md. Falls back to an auto-note if nothing matches.
+      - name: Extract CHANGELOG section
+        id: notes
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          notes="$(awk -v ver="$version" '
+            BEGIN { capture = 0 }
+            /^## \[/ {
+              if (capture) exit
+              if (index($0, "[" ver "]") || index($0, "[v" ver "]")) { capture = 1; next }
+            }
+            capture { print }
+          ' CHANGELOG.md)"
+          if [ -z "$notes" ]; then
+            notes="Release $GITHUB_REF_NAME. See CHANGELOG.md for the changes."
+          fi
+          # Prepend a one-liner pointing at the published images.
+          {
+            echo "**Container images** (multi-arch, linux/amd64 + linux/arm64):"
+            echo ""
+            echo "- \`ghcr.io/amharicdbpedia/agentic-amdbpedia-backend:${GITHUB_REF_NAME}\`"
+            echo "- \`ghcr.io/amharicdbpedia/agentic-amdbpedia-frontend:${GITHUB_REF_NAME}\`"
+            echo ""
+            echo "Download the attached \`docker-compose.release.yml\` and run \`TAG=${GITHUB_REF_NAME} docker compose -f docker-compose.release.yml up -d\`. See the README for the full flow."
+            echo ""
+            echo "---"
+            echo ""
+            echo "$notes"
+          } > release-notes.md
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: docker-compose.release.yml
+          fail_on_unmatched_files: true
