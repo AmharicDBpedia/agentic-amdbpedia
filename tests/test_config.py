@@ -62,15 +62,15 @@ def test_settings_malformed_threshold_raises_validation_error(
         Settings(_env_file=None)
 
 
-def test_predict_chain_defaults_to_local_gemma_then_groq(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_predict_chain_defaults_to_gemma4_then_groq(monkeypatch: pytest.MonkeyPatch) -> None:
     clear_settings_env(monkeypatch)
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_placeholder")
     monkeypatch.setenv("GROQ_MODEL_FAST", "qwen/qwen3.8-27b")
 
     settings = Settings(_env_file=None)
 
-    assert settings.predict_model_chain() == ("gemma2", "groq/qwen/qwen3.8-27b")
-    assert settings.predict_llm_timeout_seconds == 60.0
+    assert settings.predict_model_chain() == ("gemma4", "groq/qwen/qwen3.8-27b")
+    assert settings.predict_llm_timeout_seconds == 30.0
 
 
 @pytest.mark.parametrize("disabled", ["none", "OFF", ""])
@@ -79,7 +79,7 @@ def test_predict_fallback_can_be_disabled(monkeypatch: pytest.MonkeyPatch, disab
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_placeholder")
     monkeypatch.setenv("PREDICT_FALLBACK_MODEL", disabled)
 
-    assert Settings(_env_file=None).predict_model_chain() == ("gemma2",)
+    assert Settings(_env_file=None).predict_model_chain() == ("gemma4",)
 
 
 def test_predict_chain_honours_explicit_models(monkeypatch: pytest.MonkeyPatch) -> None:
