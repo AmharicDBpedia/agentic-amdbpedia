@@ -1,6 +1,6 @@
 [project]
 name = "agentic-amdbpedia"
-version = "0.1.0"
+version = "0.2.0"
 description = "Amharic-to-English DBpedia ontology mapping assistant using hybrid RAG and MCP."
 readme = "README.md"
 requires-python = ">=3.11"
