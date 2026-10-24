@@ -12,16 +12,18 @@ DEFAULT_RETRIEVAL_CONFIDENCE_THRESHOLD = 0.35
 # docker-compose Postgres service is opt-in via DATABASE_URL (refs 14.1).
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./data/review_queue.db"
 DEFAULT_MEDIAWIKI_BASE_URL = "https://mappings.dbpedia.org"
-# Pipeline LLM (rerank + propose-from-scratch). The primary model is the
-# local Gemma 2 9B via Ollama (rag/predict.py's registry alias); when Ollama
-# is unreachable or too slow, the same call is retried on the fallback model
-# -- by default Groq's GROQ_MODEL_FAST, so a configured GROQ_API_KEY alone is
-# enough for the LLM layer to work. Set PREDICT_FALLBACK_MODEL=none to
-# disable the fallback entirely.
-DEFAULT_PREDICT_MODEL = "gemma2"
-# Gemma 2 9B on CPU (no usable GPU) takes several seconds for the first
-# token, and much longer on the first call while Ollama loads the weights.
-DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS = 60.0
+# Pipeline LLM (rerank + propose-from-scratch). The primary model is Gemma 4
+# 26B A4B on the Google AI Studio Gemini API (rag/predict.py's registry
+# alias; MoE with ~4B active parameters). When Gemini is unreachable or too
+# slow, the same call is retried on the fallback model -- by default Groq's
+# GROQ_MODEL_FAST, so a configured GROQ_API_KEY is enough to serve traffic
+# alone. Set PREDICT_FALLBACK_MODEL=none to disable the fallback entirely.
+# GEMINI_API_KEY must be set in .env for the primary path to work; LiteLLM
+# picks it up automatically for any `gemini/*` model string.
+DEFAULT_PREDICT_MODEL = "gemma4"
+# Gemini API first-token latency over the public internet; a shorter budget
+# than the old local-Ollama default (60s) because there's no cold-load.
+DEFAULT_PREDICT_LLM_TIMEOUT_SECONDS = 30.0
 PREDICT_FALLBACK_DISABLED = {"", "none", "off", "false", "0"}
 
 

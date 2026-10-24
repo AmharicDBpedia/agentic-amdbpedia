@@ -6,7 +6,7 @@
 #
 #   # one-time:
 #   curl -LO https://github.com/AmharicDBpedia/agentic-amdbpedia/releases/latest/download/docker-compose.release.yml
-#   cp .env.example .env  # fill GROQ_API_KEY and (optionally) bot credentials
+#   cp .env.example .env  # fill GEMINI_API_KEY, GROQ_API_KEY and (optionally) bot credentials
 #
 #   # run (pin to a release):
 #   TAG=v0.1.0 docker compose -f docker-compose.release.yml up -d
@@ -16,18 +16,22 @@
 # page also has a copy of this file at
 # https://github.com/AmharicDBpedia/agentic-amdbpedia/releases/download/vX.Y.Z/docker-compose.release.yml
 #
-# Gemma (local LLM) is opt-in via the `local-llm` profile; the default stack
-# uses Groq for every LLM call. See the README for the gemma pull.
+# LLM providers: the default is Gemma 4 26B A4B on Google AI Studio
+# (`gemma4` alias -> gemini/gemma-4-26b-a4b-it), with Groq as a fallback.
+# Set GEMINI_API_KEY in .env. No local-LLM runtime (Ollama) is shipped --
+# anyone who wants a local path can override PREDICT_MODEL with a LiteLLM
+# model string of their choice.
 
 services:
   backend:
     image: ghcr.io/amharicdbpedia/agentic-amdbpedia-backend:${TAG:-latest}
     environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GROQ_MODEL_FAST: ${GROQ_MODEL_FAST:-qwen/qwen3.8-27b}
       GROQ_MODEL_REASONING: ${GROQ_MODEL_REASONING:-qwen/qwen3.8-27b}
-      PREDICT_MODEL: ${PREDICT_MODEL:-groq/qwen/qwen3.8-27b}
-      PREDICT_FALLBACK_MODEL: ${PREDICT_FALLBACK_MODEL:-none}
+      PREDICT_MODEL: ${PREDICT_MODEL:-gemma4}
+      PREDICT_FALLBACK_MODEL: ${PREDICT_FALLBACK_MODEL:-groq/qwen/qwen3.8-27b}
       MEDIAWIKI_BOT_USERNAME: ${MEDIAWIKI_BOT_USERNAME:-}
       MEDIAWIKI_BOT_PASSWORD: ${MEDIAWIKI_BOT_PASSWORD:-}
       DATABASE_URL: postgresql+asyncpg://mapping_assistant:mapping_assistant@postgres:5432/mapping_assistant
@@ -72,24 +76,6 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # Opt-in local LLM. The ~5.4 GB gemma2:9b weights are NOT baked into the
-  # image; pull them once after `docker compose --profile local-llm up -d`:
-  #   docker compose exec ollama ollama pull gemma2:9b
-  # Then switch the backend to it with
-  #   PREDICT_MODEL=gemma2 PREDICT_FALLBACK_MODEL=groq/qwen/qwen3.8-27b
-  # in .env and restart. Needs ~6.3 GB of free RAM on CPU-only hosts.
-  ollama:
-    profiles: ["local-llm"]
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      OLLAMA_KEEP_ALIVE: "30m"
-    restart: unless-stopped
-
 volumes:
   backend_data:
   postgres_data:
-  ollama_models:
