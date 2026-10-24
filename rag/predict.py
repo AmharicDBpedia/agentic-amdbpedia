@@ -38,7 +38,7 @@ LOGGER = logging.getLogger("dbpedia_mapping_assistant.predict")
 SearchFunc = Callable[..., list[RetrievalResult]]
 
 FUZZY_THRESHOLD = 85
-DEFAULT_MODEL_ALIAS = "gemma2"
+DEFAULT_MODEL_ALIAS = "gemma4"
 DEFAULT_TOP_K = 10
 
 
@@ -50,30 +50,50 @@ class ModelConfig:
 
 
 SUPPORTED_MODELS: dict[str, ModelConfig] = {
+    # Default: Gemma 4 26B A4B (MoE, ~4B active) served by Google AI Studio
+    # via LiteLLM. Replaces the previous local gemma2:9b-via-Ollama path,
+    # which was dropped from the release stack. Set GEMINI_API_KEY in .env.
+    "gemma4": ModelConfig(
+        alias="gemma4",
+        litellm_model="gemini/gemma-4-26b-a4b-it",
+        description="Gemma 4 26B A4B Instruct (default, Gemini API)",
+    ),
+    "gemma4-31b": ModelConfig(
+        alias="gemma4-31b",
+        litellm_model="gemini/gemma-4-31b-it",
+        description="Gemma 4 31B Instruct (Gemini API)",
+    ),
+    "gemma3-12b": ModelConfig(
+        alias="gemma3-12b",
+        litellm_model="gemini/gemma-3-12b-it",
+        description="Gemma 3 12B Instruct (Gemini API)",
+    ),
+    # Legacy local aliases kept for anyone still running Ollama out-of-tree.
+    # Not part of the released docker-compose stack.
     "gemma2": ModelConfig(
         alias="gemma2",
         litellm_model="ollama_chat/gemma2:9b",
-        description="Gemma 2 9B Instruct (default)",
+        description="Gemma 2 9B Instruct (legacy local, Ollama)",
     ),
     "qwen2.5:32b": ModelConfig(
         alias="qwen2.5:32b",
         litellm_model="ollama_chat/qwen2.5:32b",
-        description="Qwen 2.5 32B",
+        description="Qwen 2.5 32B (legacy local, Ollama)",
     ),
     "llama3.1": ModelConfig(
         alias="llama3.1",
         litellm_model="ollama_chat/llama3.1:8b",
-        description="Llama 3.1 8B Instruct",
+        description="Llama 3.1 8B Instruct (legacy local, Ollama)",
     ),
     "llama3.2": ModelConfig(
         alias="llama3.2",
         litellm_model="ollama_chat/llama3.2:3b",
-        description="Llama 3.2 3B Instruct",
+        description="Llama 3.2 3B Instruct (legacy local, Ollama)",
     ),
     "aya": ModelConfig(
         alias="aya",
         litellm_model="ollama_chat/aya-expanse:8b",
-        description="Aya Expanse 8B",
+        description="Aya Expanse 8B (legacy local, Ollama)",
     ),
 }
 

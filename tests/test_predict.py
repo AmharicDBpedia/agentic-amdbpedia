@@ -86,12 +86,14 @@ class FakeCatalog:
         return SimpleNamespace(local_name=canonical) if canonical else None
 
 
-def test_default_model_alias_is_gemma2() -> None:
-    assert DEFAULT_MODEL_ALIAS == "gemma2"
-    assert SUPPORTED_MODELS["gemma2"].litellm_model == "ollama_chat/gemma2:9b"
+def test_default_model_alias_is_gemma4() -> None:
+    assert DEFAULT_MODEL_ALIAS == "gemma4"
+    assert SUPPORTED_MODELS["gemma4"].litellm_model == "gemini/gemma-4-26b-a4b-it"
 
 
 def test_resolve_model_looks_up_registry_alias() -> None:
+    assert resolve_model("gemma4") == "gemini/gemma-4-26b-a4b-it"
+    # Legacy local alias still resolves for anyone running Ollama out-of-tree.
     assert resolve_model("gemma2") == "ollama_chat/gemma2:9b"
 
 

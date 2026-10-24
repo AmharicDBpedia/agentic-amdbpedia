@@ -6,10 +6,11 @@ services:
       dockerfile: Dockerfile
     environment:
       GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GROQ_MODEL_FAST: ${GROQ_MODEL_FAST:-qwen/qwen3.8-27b}
       GROQ_MODEL_REASONING: ${GROQ_MODEL_REASONING:-qwen/qwen3.8-27b}
-      PREDICT_MODEL: ${PREDICT_MODEL:-groq/qwen/qwen3.8-27b}
-      PREDICT_FALLBACK_MODEL: ${PREDICT_FALLBACK_MODEL:-none}
+      PREDICT_MODEL: ${PREDICT_MODEL:-gemma4}
+      PREDICT_FALLBACK_MODEL: ${PREDICT_FALLBACK_MODEL:-groq/qwen/qwen3.8-27b}
       DATABASE_URL: postgresql+asyncpg://mapping_assistant:mapping_assistant@postgres:5432/mapping_assistant
     ports:
       - "8001:8001"
@@ -53,32 +54,6 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  # Local LLM for the pipeline (PREDICT_MODEL=gemma2 -> ollama_chat/gemma2:9b,
-  # reached at LiteLLM's default http://localhost:11434). Models live in the
-  # ollama_models volume, so the ~5.4 GB pull happens once:
-  #   docker compose up -d ollama
-  #   docker compose exec ollama ollama pull gemma2:9b
-  # CPU-only by default; on a machine with a working NVIDIA driver and the
-  # NVIDIA Container Toolkit, add `gpus: all` to this service.
-  ollama:
-    profiles: ["local-llm"]
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_models:/root/.ollama
-    environment:
-      # Keep gemma loaded between pipeline fields instead of reloading it
-      # from disk (slow on CPU) after the default 5-minute idle timeout.
-      OLLAMA_KEEP_ALIVE: "30m"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
-      start_period: 10s
-
   # Manual/documentation convenience only (refs implementation.md 15.1) --
   # mcp_server/qa.py::verify_extraction() never depends on this service
   # being up; it starts and stops its own throwaway container per
@@ -97,4 +72,3 @@ services:
 volumes:
   backend_data:
   postgres_data:
-  ollama_models:
