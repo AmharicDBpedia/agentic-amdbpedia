@@ -1,5 +1,7 @@
 # Changelog
 
+- `feat(llm): default pipeline LLM is now Gemma 4 26B A4B on Google AI Studio (gemini/gemma-4-26b-a4b-it, LiteLLM); the previous Gemma 2 9B via Ollama path is dropped from the shipped docker-compose stack. Add GEMINI_API_KEY to .env; Groq remains the automatic fallback. 262 K-token context (vs 8 K on Gemma 2 9B), no local LLM runtime image, no 5.4 GB weights pull. Legacy aliases (gemma2, qwen2.5:32b, llama3.1, llama3.2, aya) still resolve for anyone running Ollama out-of-tree.`
+- `feat(docker): remove ollama service and ollama_models volume from docker-compose.yml and docker-compose.release.yml; shipped stack is now backend + frontend + postgres with GEMINI_API_KEY passed through. PREDICT_MODEL defaults to gemma4, PREDICT_FALLBACK_MODEL to groq/qwen/qwen3.8-27b, PREDICT_LLM_TIMEOUT_SECONDS to 30 (no cold-load path).`
 - `feat(release): tagged releases publish multi-arch Docker images to ghcr.io/amharicdbpedia/agentic-amdbpedia-{backend,frontend} and attach a ready-to-run docker-compose.release.yml to the GitHub Release; new .github/workflows/release.yml and "just release X.Y.Z" recipe to cut one`
 - `feat(ui): new 'የአጠቃቀም መመሪያ' (How to use) page in Amharic with step-by-step screenshots and an Excalidraw flow diagram; the English Documentation page stays as a separate sidebar link`
 - `fix(ui): step tracker, Coverage page and sidebar footer use English nouns (infobox fields, ontology properties, run record, Extraction coverage, Templates, tab) with Amharic verbs to match project convention`
