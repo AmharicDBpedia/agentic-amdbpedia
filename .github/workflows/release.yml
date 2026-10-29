@@ -71,6 +71,29 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      # GHCR packages inherit the repo's visibility only once visibility is
+      # set explicitly; first push lands them as `private`. Flip to public
+      # on every release so `docker pull` works without a token. Idempotent
+      # and non-fatal: a 404 (package not yet indexed) or an existing
+      # `public` state both exit 0.
+      - name: Make package public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          pkg="agentic-amdbpedia-${{ matrix.name }}"
+          code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/orgs/AmharicDBpedia/packages/container/${pkg}/visibility" \
+            -d '{"visibility":"public"}' || true)
+          echo "visibility PATCH -> HTTP $code"
+          cat /tmp/resp.json || true
+          if [[ "$code" != "204" && "$code" != "200" && "$code" != "404" ]]; then
+            echo "::warning::Failed to set ${pkg} to public (HTTP ${code}); flip it manually at https://github.com/orgs/AmharicDBpedia/packages/container/${pkg}/settings"
+          fi
 
   release:
     runs-on: ubuntu-latest

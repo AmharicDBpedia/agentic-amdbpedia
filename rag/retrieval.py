@@ -37,6 +37,7 @@ from rag.embeddings import (
     embed_query_dense,
     embed_sparse,
     embed_sparse_batch,
+    evict_model_caches,
 )
 
 LOGGER = logging.getLogger("dbpedia_mapping_assistant.retrieval")
@@ -178,6 +179,17 @@ def encode_query(
     try:
         return dense_embedder(amharic_text), sparse_embedder(amharic_text)
     except Exception as exc:
+        # A wedged embedder (fastembed worker killed, torch allocator fault,
+        # tokenizer broken pipe) stays wedged because the cached instance
+        # keeps raising the same error on every call. Drop it so the next
+        # request rebuilds from scratch instead of pinning the service to
+        # retrieval_unavailable until restart. Only runs for the real
+        # production embedders, not for injected ones in tests.
+        if dense_embedder is embed_query_dense and sparse_embedder is embed_sparse:
+            try:
+                evict_model_caches()
+            except Exception:  # pragma: no cover - defensive
+                pass
         raise RetrievalUnavailableError(f"Embedding model unavailable: {exc}") from exc
 
 
