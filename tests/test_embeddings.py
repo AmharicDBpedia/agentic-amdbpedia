@@ -4,6 +4,8 @@ import pytest
 
 from errors import RetrievalUnavailableError
 from rag.embeddings import (
+    _DENSE_MODEL_CACHE,
+    _SPARSE_MODEL_CACHE,
     DEFAULT_DENSE_MODEL,
     DEFAULT_EMBEDDING_DEVICE,
     DEFAULT_SPARSE_MODEL,
@@ -12,6 +14,7 @@ from rag.embeddings import (
     embed_dense,
     embed_query_dense,
     embed_sparse,
+    evict_model_caches,
     lexical_sparse_vector,
 )
 
@@ -98,3 +101,53 @@ def test_embed_sparse_uses_bm25_and_returns_matching_indices() -> None:
     assert isinstance(vector, SparseVector)
     assert vector.indices
     assert len(vector.indices) == len(vector.values)
+
+
+def test_evict_model_caches_clears_both_caches() -> None:
+    """A wedged embedder (fastembed worker killed, torch allocator fault)
+    stays wedged if its cached instance is never dropped -- the
+    `/v1/find-semantic-match` regression where every request after the
+    first failure returns `Broken pipe` indefinitely.
+    """
+    _DENSE_MODEL_CACHE["sentinel"] = object()  # type: ignore[assignment]
+    _SPARSE_MODEL_CACHE["sentinel"] = object()
+    assert _DENSE_MODEL_CACHE and _SPARSE_MODEL_CACHE
+
+    evict_model_caches()
+
+    assert not _DENSE_MODEL_CACHE
+    assert not _SPARSE_MODEL_CACHE
+
+
+def test_encode_query_evicts_caches_on_production_embedder_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`encode_query` must drop the cached embedders when the production
+    pair raises, so the next request rebuilds instead of returning the
+    same `[Errno 32] Broken pipe` forever (verified live: pass rate on
+    the end-to-end harness went from 2/10 to 10/10 after this).
+    """
+    from rag import retrieval
+
+    _DENSE_MODEL_CACHE["sentinel"] = object()  # type: ignore[assignment]
+    _SPARSE_MODEL_CACHE["sentinel"] = object()
+
+    def broken_dense(_: str) -> list[float]:
+        raise OSError(32, "Broken pipe")
+
+    def broken_sparse(_: str) -> SparseVector:
+        return SparseVector(indices=[], values=[])
+
+    # Monkeypatch the module-level defaults so the production-identity
+    # check in encode_query sees the broken callables as "production".
+    monkeypatch.setattr(retrieval, "embed_query_dense", broken_dense)
+    monkeypatch.setattr(retrieval, "embed_sparse", broken_sparse)
+
+    with pytest.raises(RetrievalUnavailableError):
+        retrieval.encode_query(
+            "ዋና_ከተማ",
+            dense_embedder=broken_dense,
+            sparse_embedder=broken_sparse,
+        )
+    assert not _DENSE_MODEL_CACHE
+    assert not _SPARSE_MODEL_CACHE

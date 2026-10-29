@@ -29,6 +29,24 @@ _SPARSE_MODEL_CACHE: dict[str, Any] = {}
 _SPARSE_MODEL_CACHE_LOCK = threading.Lock()
 
 
+def evict_model_caches() -> None:
+    """Drop every cached embedder so the next call reloads fresh instances.
+
+    Needed because an in-flight embedder can wedge (fastembed/ONNX worker
+    killed, torch allocator fault, HF tokenizer broken pipe...) and every
+    subsequent call then raises `[Errno 32] Broken pipe` indefinitely:
+    nothing else ever rebuilds the cached object. Called from
+    `retrieval.encode_query`'s except-branch so a transient failure
+    recovers on the next request instead of pinning the service to
+    `retrieval_unavailable` until restart.
+    """
+
+    with _DENSE_MODEL_CACHE_LOCK:
+        _DENSE_MODEL_CACHE.clear()
+    with _SPARSE_MODEL_CACHE_LOCK:
+        _SPARSE_MODEL_CACHE.clear()
+
+
 @dataclass(frozen=True)
 class SparseVector:
     """Sparse vector representation, independent of any vector-database client."""
