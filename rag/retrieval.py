@@ -12,6 +12,7 @@ scores `1 / (1 + 1) = 0.5`, matching Qdrant's own single-channel RRF score.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import os
@@ -186,10 +187,8 @@ def encode_query(
         # retrieval_unavailable until restart. Only runs for the real
         # production embedders, not for injected ones in tests.
         if dense_embedder is embed_query_dense and sparse_embedder is embed_sparse:
-            try:
+            with contextlib.suppress(Exception):
                 evict_model_caches()
-            except Exception:  # pragma: no cover - defensive
-                pass
         raise RetrievalUnavailableError(f"Embedding model unavailable: {exc}") from exc
 
 

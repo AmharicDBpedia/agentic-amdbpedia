@@ -4,12 +4,12 @@ import pytest
 
 from errors import RetrievalUnavailableError
 from rag.embeddings import (
+    _DENSE_MODEL_CACHE,
+    _SPARSE_MODEL_CACHE,
     DEFAULT_DENSE_MODEL,
     DEFAULT_EMBEDDING_DEVICE,
     DEFAULT_SPARSE_MODEL,
     SparseVector,
-    _DENSE_MODEL_CACHE,
-    _SPARSE_MODEL_CACHE,
     dense_vector_size,
     embed_dense,
     embed_query_dense,
@@ -119,7 +119,9 @@ def test_evict_model_caches_clears_both_caches() -> None:
     assert not _SPARSE_MODEL_CACHE
 
 
-def test_encode_query_evicts_caches_on_production_embedder_failure() -> None:
+def test_encode_query_evicts_caches_on_production_embedder_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """`encode_query` must drop the cached embedders when the production
     pair raises, so the next request rebuilds instead of returning the
     same `[Errno 32] Broken pipe` forever (verified live: pass rate on
@@ -138,19 +140,14 @@ def test_encode_query_evicts_caches_on_production_embedder_failure() -> None:
 
     # Monkeypatch the module-level defaults so the production-identity
     # check in encode_query sees the broken callables as "production".
-    original_dense = retrieval.embed_query_dense
-    original_sparse = retrieval.embed_sparse
-    retrieval.embed_query_dense = broken_dense  # type: ignore[assignment]
-    retrieval.embed_sparse = broken_sparse  # type: ignore[assignment]
-    try:
-        with pytest.raises(RetrievalUnavailableError):
-            retrieval.encode_query(
-                "ዋና_ከተማ",
-                dense_embedder=broken_dense,
-                sparse_embedder=broken_sparse,
-            )
-        assert not _DENSE_MODEL_CACHE
-        assert not _SPARSE_MODEL_CACHE
-    finally:
-        retrieval.embed_query_dense = original_dense  # type: ignore[assignment]
-        retrieval.embed_sparse = original_sparse  # type: ignore[assignment]
+    monkeypatch.setattr(retrieval, "embed_query_dense", broken_dense)
+    monkeypatch.setattr(retrieval, "embed_sparse", broken_sparse)
+
+    with pytest.raises(RetrievalUnavailableError):
+        retrieval.encode_query(
+            "ዋና_ከተማ",
+            dense_embedder=broken_dense,
+            sparse_embedder=broken_sparse,
+        )
+    assert not _DENSE_MODEL_CACHE
+    assert not _SPARSE_MODEL_CACHE
