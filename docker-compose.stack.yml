@@ -1,11 +1,16 @@
 # Single-command stack: optimized backend + frontend + postgres.
-# Uses pre-built images (no rebuild). Boot with:
-#   docker compose -f docker-compose.stack.yml up -d
+# Build + boot in one command:
+#   docker compose --env-file .env.stack -f docker-compose.stack.yml up -d --build
+# Build only (parallel):
+#   docker compose -f docker-compose.stack.yml build
 # Requires a .env.stack file with GEMINI_API_KEY and GROQ_API_KEY.
 
 services:
   backend:
     image: amdbpedia-backend:optimized
+    build:
+      context: .
+      dockerfile: Dockerfile
     environment:
       GEMINI_API_KEY: ${GEMINI_API_KEY:?set GEMINI_API_KEY in .env.stack}
       GROQ_API_KEY: ${GROQ_API_KEY:?set GROQ_API_KEY in .env.stack}
@@ -25,6 +30,9 @@ services:
 
   frontend:
     image: agentic-amdbpedia-frontend:optimized
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     environment:
       # Browser-side URL -- resolved on the host, not inside the container,
       # so this must point at the backend's host-published port.
