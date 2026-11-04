@@ -1,6 +1,8 @@
 .git
 .github
+.gitignore
 .env
+.env.*
 .venv
 .uv-cache
 .uv-tools
@@ -11,9 +13,33 @@ __pycache__
 .coverage
 .hypothesis
 .benchmarks
-frontend/node_modules
-frontend/.svelte-kit
-frontend/build
+.ollama-pull
+.serena
+.pre-commit-config.yaml
+# The frontend lives in its own image; everything under frontend/ is dead
+# weight in the backend build context.
+frontend
+# Tests, evals, docs, examples, implementation notes don't ship in the
+# runtime image.
+tests
+evaluation
+docs
+examples
+implementation.md
+justfile
+# Local-only data: the retrieval cache is per-host (rebuilt on first
+# request), the review and experiment queues are per-deployment DBs, and
+# the training export + the previous session's smoke blob never belong
+# in the image.
 data/.cache
 data/.hf-cache
 data/review_queue.db
+data/experiment_queue.db
+data/training_examples.jsonl
+data/gemma4_pipeline_smoke.json
+# Compose / IDE / project junk.
+docker-compose*.yml
+Dockerfile*
+*.log
+.vscode
+.idea

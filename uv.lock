@@ -29,6 +29,7 @@ name = "agentic-amdbpedia"
 version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "asyncpg" },
     { name = "dspy" },
     { name = "fastembed" },
@@ -51,7 +52,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "aiosqlite" },
     { name = "datasets" },
     { name = "httpx" },
     { name = "hypothesis" },
@@ -67,6 +67,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "asyncpg", specifier = ">=0.31.0" },
     { name = "dspy", specifier = ">=3.3.1" },
     { name = "fastembed", specifier = ">=0.7.0" },
@@ -88,7 +89,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "datasets", specifier = ">=5.0.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "hypothesis", specifier = ">=6.135.0" },
